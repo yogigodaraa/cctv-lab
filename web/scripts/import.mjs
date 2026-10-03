@@ -56,6 +56,11 @@ for (const [i, file] of files.entries()) {
   const src = join(dir, file);
   const name = `${basename(file, extname(file))}.mp4`;
   const out = join(tmpdir(), `cctvlab-${Date.now()}-${name}`);
+  const [existing] = await sql`SELECT id FROM videos WHERE name = ${name} AND source = ${values.source}`;
+  if (existing) {
+    console.log(`[${i + 1}/${files.length}] ${file} already imported, skipping`);
+    continue;
+  }
   try {
     await run('ffmpeg', [
       '-y', '-loglevel', 'error', '-i', src,
