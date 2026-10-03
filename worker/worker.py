@@ -1,8 +1,8 @@
 """Mac-side worker: pulls queued analysis jobs from the CCTV Lab API, runs the
 models locally (Apple GPU via MPS), and posts scores back.
 
-Video is downloaded to a temp file, analysed in memory, and deleted straight
-after. No frames are ever uploaded or stored.
+Clips are downloaded to a local cache and analysed in memory. No frames are
+ever uploaded or stored; only scores and short captions are posted back.
 
 Usage:
     API_BASE=https://<your-app-url> WORKER_TOKEN=... python worker.py
@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -67,11 +68,28 @@ def heartbeat() -> None:
     )
 
 
+# Clips are cached between runs so analysing one clip with several models costs a
+# single Blob read (the free tier allows 10k reads/month). Delete the folder any time.
+CACHE_DIR = os.environ.get("CACHE_DIR", os.path.join(tempfile.gettempdir(), "cctv-lab-cache"))
+CACHE_MAX = int(os.environ.get("CACHE_MAX", "400"))
+
+
 def download(url: str) -> str:
-    fd, path = tempfile.mkstemp(suffix=os.path.splitext(url.split("?")[0])[1] or ".mp4")
-    with os.fdopen(fd, "wb") as out, urllib.request.urlopen(url, timeout=120, context=SSL_CONTEXT) as res:
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    name = hashlib.sha256(url.encode()).hexdigest()[:24] + (os.path.splitext(url.split("?")[0])[1] or ".mp4")
+    path = os.path.join(CACHE_DIR, name)
+    if os.path.exists(path):
+        os.utime(path)
+        return path
+    tmp = path + ".part"
+    with open(tmp, "wb") as out, urllib.request.urlopen(url, timeout=120, context=SSL_CONTEXT) as res:
         while chunk := res.read(1 << 20):
             out.write(chunk)
+    os.replace(tmp, path)
+    # Evict least recently used clips beyond CACHE_MAX.
+    files = sorted((os.path.join(CACHE_DIR, f) for f in os.listdir(CACHE_DIR)), key=os.path.getmtime)
+    for old in files[:-CACHE_MAX]:
+        os.remove(old)
     return path
 
 
@@ -80,28 +98,25 @@ def process(job: dict) -> None:
     detector = DETECTORS[run["model"]]
     log.info("Run %s: %s on '%s'", run["id"], detector.name, video["name"])
     path = download(video["url"])
-    try:
-        t0 = time.perf_counter()
-        detector.load()
-        load_ms = (time.perf_counter() - t0) * 1000
+    t0 = time.perf_counter()
+    detector.load()
+    load_ms = (time.perf_counter() - t0) * 1000
 
-        segments, infer_ms = [], 0.0
-        for window in iter_windows(path, detector.window_s, detector.stride_s, detector.frames_per_window):
-            t = time.perf_counter()
-            segments.append(asdict(detector.score(window)))
-            infer_ms += (time.perf_counter() - t) * 1000
+    segments, infer_ms = [], 0.0
+    for window in iter_windows(path, detector.window_s, detector.stride_s, detector.frames_per_window):
+        t = time.perf_counter()
+        segments.append(asdict(detector.score(window)))
+        infer_ms += (time.perf_counter() - t) * 1000
 
-        timing = {
-            "load_ms": round(load_ms, 1),
-            "inference_ms": round(infer_ms, 1),
-            "ms_per_segment": round(infer_ms / max(len(segments), 1), 1),
-            "segments": len(segments),
-        }
-        call(f"/runs/{run['id']}/complete", {"segments": segments, "timing": timing, "device": str(pick_device())})
-        top = max((s["fight_score"] for s in segments), default=0.0)
-        log.info("Run %s done: %d segments, max score %.2f, %.0f ms/segment", run["id"], len(segments), top, timing["ms_per_segment"])
-    finally:
-        os.remove(path)
+    timing = {
+        "load_ms": round(load_ms, 1),
+        "inference_ms": round(infer_ms, 1),
+        "ms_per_segment": round(infer_ms / max(len(segments), 1), 1),
+        "segments": len(segments),
+    }
+    call(f"/runs/{run['id']}/complete", {"segments": segments, "timing": timing, "device": str(pick_device())})
+    top = max((s["fight_score"] for s in segments), default=0.0)
+    log.info("Run %s done: %d segments, max score %.2f, %.0f ms/segment", run["id"], len(segments), top, timing["ms_per_segment"])
 
 
 def main() -> None:

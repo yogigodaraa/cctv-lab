@@ -48,7 +48,15 @@
 
     <main id="tab-monitor" class="layout">
       <section class="wall">
-        <h2>Camera wall</h2>
+        <div class="wall-head">
+          <h2>Camera wall <span id="wall-count" class="muted"></span></h2>
+          <select id="wall-filter" aria-label="Filter by label">
+            <option value="all">All</option>
+            <option value="fight">Fight</option>
+            <option value="nonfight">Non-fight</option>
+            <option value="unknown">Unlabelled</option>
+          </select>
+        </div>
         <div id="tiles" class="tiles"></div>
         <p id="empty-wall" class="muted hidden">No videos yet. Upload a clip to start.</p>
       </section>

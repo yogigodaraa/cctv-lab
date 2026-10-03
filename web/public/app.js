@@ -9,7 +9,19 @@ const state = {
   runs: [], // runs (with segments) for the selected video
   threshold: 0.5,
   pollTimer: null,
+  wallLimit: 30, // tiles rendered at once; keeps Blob reads within the free tier
+  wallFilter: 'all',
 };
+
+// Thumbnails only load when a tile scrolls into view (each load is a Blob read).
+const thumbObserver = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    if (!e.isIntersecting) continue;
+    const v = e.target;
+    v.src = v.dataset.src;
+    thumbObserver.unobserve(v);
+  }
+}, { rootMargin: '200px' });
 
 // ---------- helpers ----------
 
@@ -114,7 +126,10 @@ function renderTiles() {
   const tiles = $('tiles');
   tiles.replaceChildren();
   $('empty-wall').classList.toggle('hidden', state.videos.length > 0);
-  state.videos.forEach((v, i) => {
+  const visible = state.videos.filter((v) => state.wallFilter === 'all' || v.label === state.wallFilter);
+  $('wall-count').textContent = `${visible.length} clip${visible.length === 1 ? '' : 's'}`;
+  visible.slice(0, state.wallLimit).forEach((v) => {
+    const i = state.videos.indexOf(v);
     const scores = Object.entries(v.latest ?? {});
     const flagged = scores.some(([, r]) => r.max_score !== null && r.max_score >= state.threshold);
     const chips = el('div', { className: 'chips' }, [
@@ -125,7 +140,9 @@ function renderTiles() {
           textContent: r.status === 'done' ? `${model} ${r.max_score?.toFixed(2) ?? '–'}` : `${model} ${r.status}`,
         })),
     ]);
-    const thumb = el('video', { src: `${v.url}#t=0.5`, muted: true, preload: 'metadata', playsInline: true });
+    const thumb = el('video', { muted: true, preload: 'metadata', playsInline: true });
+    thumb.dataset.src = `${v.url}#t=0.5`;
+    thumbObserver.observe(thumb);
     const tile = el('button', {
       className: `tile ${v.id === state.selectedId ? 'active' : ''} ${flagged ? 'flagged' : ''}`,
       onclick: () => selectVideo(v.id),
@@ -135,7 +152,20 @@ function renderTiles() {
     ])]);
     tiles.append(tile);
   });
+  if (visible.length > state.wallLimit) {
+    tiles.append(el('button', {
+      className: 'ghost',
+      textContent: `Show more (${visible.length - state.wallLimit} hidden)`,
+      onclick: () => { state.wallLimit += 30; renderTiles(); },
+    }));
+  }
 }
+
+$('wall-filter').addEventListener('change', (e) => {
+  state.wallFilter = e.target.value;
+  state.wallLimit = 30;
+  renderTiles();
+});
 
 const selectedVideo = () => state.videos.find((v) => v.id === state.selectedId);
 

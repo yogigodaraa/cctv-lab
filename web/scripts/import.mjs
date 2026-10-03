@@ -2,7 +2,7 @@
 // Each file is transcoded to browser-friendly H.264 MP4 (max 640px wide), uploaded
 // to Blob storage and registered in the database with an optional ground-truth label.
 //
-//   npm run import -- <dir> [--label fight|nonfight|unknown] [--limit N]
+//   npm run import -- <dir> [--label fight|nonfight|unknown] [--limit N] [--source name]
 //
 // Check the dataset licence before importing: most violence datasets are
 // research-only and must not be shared publicly.
@@ -21,7 +21,11 @@ const VIDEO_EXT = new Set(['.mp4', '.avi', '.mov', '.mkv', '.webm', '.m4v']);
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { label: { type: 'string', default: 'unknown' }, limit: { type: 'string' } },
+  options: {
+    label: { type: 'string', default: 'unknown' },
+    limit: { type: 'string' },
+    source: { type: 'string', default: 'import' },
+  },
 });
 const [dir] = positionals;
 if (!dir || !['fight', 'nonfight', 'unknown'].includes(values.label)) {
@@ -66,7 +70,7 @@ for (const [i, file] of files.entries()) {
     await sql`
       INSERT INTO videos (name, url, content_type, size_bytes, duration_s, width, height, label, source)
       VALUES (${name}, ${blob.url}, 'video/mp4', ${size}, ${meta.duration_s}, ${meta.width}, ${meta.height},
-              ${values.label}, 'import')`;
+              ${values.label}, ${values.source})`;
     console.log(`[${i + 1}/${files.length}] ${file} → ${(size / 1e6).toFixed(1)} MB`);
   } catch (err) {
     console.error(`[${i + 1}/${files.length}] ${file} failed: ${err.message}`);
