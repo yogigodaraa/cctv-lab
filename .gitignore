@@ -1,0 +1,11 @@
+node_modules/
+.vercel/
+.env*
+!.env.example
+__pycache__/
+.venv/
+*.mp4
+*.avi
+*.mov
+.DS_Store
+.vercel
