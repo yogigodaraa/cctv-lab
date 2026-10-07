@@ -1,6 +1,6 @@
 # torch, torchvision, numpy, opencv-python and Pillow are reused from the system
 # Python (the venv is created with --system-site-packages).
 transformers>=4.49
-accelerate>=1.0
+accelerate>=1.15.0
 num2words>=0.5.14  # needed by the SmolVLM (Idefics3) processor
 certifi>=2024.0
