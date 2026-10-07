@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Check names: "web / test" and "worker / test". Keep job ids stable.
+  # web/ has no lint/test/build scripts yet, so this verifies a clean `npm ci` from the lockfile.
+  web:
+    uses: yogigodaraa/.github/.github/workflows/node-ci.yml@main
+    with:
+      working-directory: web
+
+  # The worker needs system PyTorch/OpenCV and ~1.3 GB of model weights, so CI lints and
+  # byte-compiles it instead of running the models. Run `python smoke_test.py <clip>` locally.
+  worker:
+    uses: yogigodaraa/.github/.github/workflows/python-ci.yml@main
+    with:
+      working-directory: worker
+      python-version: "3.12"
+      requirements: ""
+      test-command: "python -m compileall -q ."

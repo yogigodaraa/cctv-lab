@@ -1,5 +1,11 @@
 # CCTV Lab
 
+[![CI](https://github.com/yogigodaraa/cctv-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/yogigodaraa/cctv-lab/actions/workflows/ci.yml)
+
+> **Research use only.** Read the [ethics and privacy statement](ETHICS.md) before using this with any footage.
+
+**Live demo (passcode-protected):** <https://cctv-lab.vercel.app>
+
 A CCTV-style test bench for **privacy-preserving fight detection** research. Upload clips from any device (iPad included), queue them for analysis, and compare models on an operator-style monitor with alert timelines and false-positive metrics.
 
 Part of a research project on real-time violence detection for existing CCTV, with privacy by design: **no face recognition, no identification, and a human always in the loop.**
@@ -59,6 +65,14 @@ npm run import -- /path/to/RWF-2000/val/NonFight --label nonfight --limit 50
 Check dataset licences first. Most violence datasets are research-only.
 
 ## Privacy notes
+
+See [ETHICS.md](ETHICS.md) for intended use, out-of-scope uses and dataset guidance.
+
 - The app is behind a passcode. Blob video URLs are unguessable but public, so only upload footage you're allowed to store.
 - The "Privacy blur" toggle blurs the operator view; the models still see full frames.
 - Planned: pose/skeleton-only view, private Blob storage, data-retention limits.
+
+## License
+
+<!-- TODO(yogi): choose a licence. Consider a responsible-use licence (e.g. OpenRAIL) for a surveillance-adjacent research project. Until then, all rights reserved. -->
+No licence has been chosen yet, so all rights are reserved by default.
