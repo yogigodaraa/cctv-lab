@@ -4,7 +4,10 @@ Research note: X-CLIP stays frozen; only a logistic-regression head is trained,
 on 2 s segments labelled from UBI-Fights' frame-level annotations (a segment is
 "fight" if at least half its frames are). Evaluation is 5-fold cross-validation
 grouped by video: every video's scores come from a model that never saw that
-video, so per-video results are honest held-out results.
+video, so per-video results are honest held-out results. The regularisation
+strength is picked inside each training fold (nested CV), never on test videos.
+Scores are then smoothed over neighbouring segments, since fights last longer
+than 2 s.
 
 Usage:
     python train_probe.py <UBI_FIGHTS dir> <out.json>
@@ -37,6 +40,18 @@ WINDOW_S = STRIDE_S = 2.0
 FRAMES = 8
 BATCH = 8
 FOLDS = 5
+C_GRID = (0.5, 0.05, 0.005, 0.0005)  # chosen per outer fold by inner grouped CV
+SMOOTH = 2  # average each segment's score with 2 neighbours either side (fixed a priori)
+
+
+def smooth(p: np.ndarray, groups: np.ndarray, k: int = SMOOTH) -> np.ndarray:
+    """Moving average of scores within each video (edges padded)."""
+    q = p.copy()
+    for g in np.unique(groups):
+        m = groups == g
+        s = np.pad(p[m], (k, k), mode="edge")
+        q[m] = np.convolve(s, np.ones(2 * k + 1) / (2 * k + 1), mode="valid")
+    return q
 
 
 def frame_labels(csv_path: str) -> np.ndarray:
@@ -113,22 +128,37 @@ def main() -> None:
     oof = np.zeros(len(y))
     fold_of_video = {}
     cv = StratifiedGroupKFold(n_splits=FOLDS, shuffle=True, random_state=0)
+    def head(c):
+        return make_pipeline(StandardScaler(), LogisticRegression(C=c, class_weight="balanced", max_iter=3000))
+
+    chosen = []
     for k, (tr, te) in enumerate(cv.split(X, video_label, groups)):
-        clf = make_pipeline(StandardScaler(), LogisticRegression(C=0.5, class_weight="balanced", max_iter=2000))
-        clf.fit(X[tr], y[tr])
-        oof[te] = clf.predict_proba(X[te])[:, 1]
+        inner = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=1)
+        best_c, best_auc = None, -1.0
+        for c in C_GRID:
+            p = np.zeros(len(tr))
+            for itr, ite in inner.split(X[tr], video_label[tr], groups[tr]):
+                p[ite] = head(c).fit(X[tr][itr], y[tr][itr]).predict_proba(X[tr][ite])[:, 1]
+            auc = roc_auc_score(y[tr], smooth(p, groups[tr]))
+            if auc > best_auc:
+                best_c, best_auc = c, auc
+        chosen.append(best_c)
+        oof[te] = head(best_c).fit(X[tr], y[tr]).predict_proba(X[te])[:, 1]
         for g in np.unique(groups[te]):
             fold_of_video[int(g)] = {
+                "C": best_c,
                 "fold": k + 1,
                 "train_videos": int(len(np.unique(groups[tr]))),
                 "train_segments": int(len(tr)),
                 "train_fight_segments": int(y[tr].sum()),
             }
 
+    raw_auc = roc_auc_score(y, oof)
+    oof = smooth(oof, groups)
     summary = {
         "model": "xclip-probe",
         "backbone": MODEL_ID + " (frozen)",
-        "head": "standardise + logistic regression (C=0.5, class-balanced)",
+        "head": f"standardise + logistic regression (class-balanced, C picked per fold from {list(C_GRID)} by inner CV: {chosen}) + temporal smoothing ±{SMOOTH} segments",
         "data": "UBI-Fights subset, segment labels from frame-level annotations (>= 50% fight frames)",
         "videos": len(videos),
         "segments": int(len(y)),
@@ -136,6 +166,7 @@ def main() -> None:
         "folds": FOLDS,
         "split": "StratifiedGroupKFold by video (no video in both train and test)",
         "segment_roc_auc": round(float(roc_auc_score(y, oof)), 4),
+        "segment_roc_auc_unsmoothed": round(float(raw_auc), 4),
         "segment_avg_precision": round(float(average_precision_score(y, oof)), 4),
         "embed_seconds": round(embed_s, 1),
         "trained_at": time.strftime("%Y-%m-%d %H:%M"),

@@ -59,8 +59,8 @@ const MODEL_INFO = {
     title: 'X-CLIP + trained head',
     type: 'Frozen X-CLIP video features + logistic-regression classifier.',
     input: '8 frames per 2 s segment',
-    how: 'X-CLIP turns each segment into a 512-d feature vector; a classifier trained on UBI-Fights frame-level labels scores it.',
-    training: '5-fold cross-validation grouped by video: each clip is scored by a model trained on the other ~80% of clips, never on itself.',
+    how: 'X-CLIP turns each segment into a 512-d feature vector; a classifier trained on UBI-Fights frame-level labels scores it; scores are averaged with 2 neighbouring segments either side.',
+    training: '5-fold cross-validation grouped by video: each clip is scored by a model trained on the other ~80% of clips, never on itself. Regularisation picked by nested CV inside each training fold.',
     plain: 'Same X-CLIP "eyes", but instead of comparing with sentences we trained a small decision layer on real CCTV fights and normal footage, using the frame-by-frame labels that come with UBI-Fights.',
     size: 'X-CLIP backbone (frozen) + 513 trained weights',
     pros: ['Learns what CCTV fights actually look like', 'Trains in seconds on a laptop', 'Honest held-out evaluation'],
@@ -690,7 +690,7 @@ async function renderModelCards(rows) {
       ...(extra ? [
         ['Data', `${extra.videos} clips, ${extra.segments} segments (${extra.fight_segments} fight)`],
         ['Split', extra.split],
-        ['Held-out result', `segment ROC-AUC ${extra.segment_roc_auc}, average precision ${extra.segment_avg_precision}`],
+        ['Held-out result', `segment ROC-AUC ${extra.segment_roc_auc}, average precision ${extra.segment_avg_precision} (fight base rate ${(extra.fight_segments / extra.segments * 100).toFixed(0)}%)`],
         ['Trained', extra.trained_at],
       ] : []),
     ].filter(([, v]) => v);
