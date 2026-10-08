@@ -224,7 +224,7 @@ export const EXPERIMENTS = [
     method: 'Throughput and latency per pipeline on an M2 and one on-prem GPU, broken down into decode / pose / classify.' },
   { id: 'E10', status: 'planned', rq: [1], title: 'Privacy leakage of our pose features',
     hypothesis: 'Stored skeleton sequences still leak some identity or attributes (following Moon et al. 2021).',
-    method: 'Train an attacker to re-identify people or predict attributes from the features we keep; report what the system must not store.' },
+    method: 'Evaluate privacy risk without identification experiments: inventory retained pose fields and retention, apply published leakage evidence, and report which features the system must not store.' },
   { id: 'E11', status: 'planned', rq: [2], title: 'Prompt and window ablations for zero-shot models',
     hypothesis: 'Hard-negative prompts and longer windows (2 → 4 → 8 s) reduce false alarms without training.',
     method: 'Prompt ensembles, X-CLIP 16-frame variant, window length and smoothing sweeps; false alarms/h at fixed recall.' },
