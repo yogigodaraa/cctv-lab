@@ -247,3 +247,16 @@ table.backlog td:first-child { font-weight: 600; white-space: nowrap; }
 .paper dd { margin: 0; }
 .paper .tags { display: flex; gap: 4px; flex-wrap: wrap; }
 .badge.uwa { background: rgba(242, 177, 52, .15); color: var(--warn); border: 1px solid var(--warn); }
+
+/* Long lists scroll inside their own box so pages stay short */
+.experiments, .papers, .backlog-wrap, .tiles, .rq-cards {
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.experiments { max-height: 360px; padding-right: 4px; }
+.backlog-wrap { max-height: 380px; border: 1px solid var(--line); border-radius: var(--radius); }
+.backlog-wrap thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.papers { max-height: 520px; padding-right: 4px; }
+.tiles { max-height: 520px; padding-right: 4px; }
+.research-page { gap: 20px; }
