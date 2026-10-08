@@ -180,3 +180,36 @@ table { border-collapse: collapse; width: 100%; font-family: var(--mono); font-s
 th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
 th:first-child, td:first-child { text-align: left; }
 th { color: var(--muted); font-weight: 500; }
+
+/* Per-clip results */
+.clip-results { display: grid; gap: 8px; margin-bottom: 12px; }
+.clip-results h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 500; }
+.clip-results table td, .clip-results table th { padding: 6px 8px; font-size: 12px; }
+.badge { font: 600 10px var(--mono); padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: .04em; }
+.badge.zero { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+.badge.trained { background: rgba(63, 182, 139, .15); color: var(--accent); border: 1px solid var(--accent); }
+.training-note { color: var(--muted); font-size: 11px; white-space: normal; text-align: left !important; max-width: 280px; }
+.good { color: var(--accent); }
+.bad { color: var(--danger); }
+
+/* Model cards */
+.model-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.model-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 8px; align-content: start; }
+.model-card h3 { margin: 0; font: 600 14px var(--mono); display: flex; gap: 8px; align-items: center; }
+.model-card dl { margin: 0; display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; font-size: 12px; }
+.model-card dt { color: var(--muted); }
+.model-card dd { margin: 0; }
+
+/* Models page */
+.models-page { padding: 16px; display: grid; gap: 24px; max-width: 1400px; }
+.pipeline { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; counter-reset: step; }
+.pipeline li { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 4px; position: relative; counter-increment: step; }
+.pipeline li::before { content: counter(step); font: 600 11px var(--mono); color: var(--accent); }
+.pipeline b { font-family: var(--mono); }
+.pipeline span { color: var(--muted); font-size: 12px; }
+.model-card p { margin: 0; color: var(--muted); font-size: 13px; }
+.model-card .plain { color: var(--text); font-size: 13px; }
+.model-card.planned { border-style: dashed; }
+.pros-cons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 12px; }
+.pros-cons ul { margin: 4px 0 0; padding-left: 16px; }
+.pros-cons .good, .pros-cons .bad { font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }

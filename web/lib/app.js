@@ -125,6 +125,10 @@ api.get('/status', async (_req, res) => {
   res.json({ workers, queue, models: [...models.values()] });
 });
 
+api.get('/model-cards', async (_req, res) => {
+  res.json(await sql`SELECT name, info, updated_at FROM model_cards ORDER BY name`);
+});
+
 // Token endpoint for direct browser -> Blob uploads (bypasses the 4.5 MB function body limit).
 api.post('/blob-upload', async (req, res) => {
   const result = await handleUpload({

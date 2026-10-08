@@ -28,6 +28,7 @@
         <button class="tab active" data-tab="wall">Camera wall</button>
         <button class="tab" data-tab="monitor">Investigate</button>
         <button class="tab" data-tab="eval">Evaluation</button>
+        <button class="tab" data-tab="models">Models</button>
       </nav>
       <div class="status">
         <span id="worker-pill" class="pill">Worker: checking…</span>
@@ -88,6 +89,8 @@
         </div>
 
         <div id="timelines" class="timelines"></div>
+
+        <div id="clip-results" class="clip-results"></div>
 
         <div class="controls">
           <div class="control">
@@ -153,7 +156,42 @@
           <tbody id="metrics-body"></tbody>
         </table>
       </div>
-      <p class="muted small">Zero-shot models, not trained on violence data. Footage: UBI-Fights (Degardin &amp; Proença, 2020), frame-level annotated, research use only.</p>
+      <p class="muted small">X-CLIP and SmolVLM are zero-shot; xclip-probe is trained and scored with 5-fold cross-validation grouped by video. Footage: UBI-Fights (Degardin &amp; Proença, 2020), frame-level annotated, research use only.</p>
+    </main>
+
+    <main id="tab-models" class="models-page hidden">
+      <section>
+        <h2>How a clip becomes an alert</h2>
+        <ol class="pipeline">
+          <li><b>Video</b><span>Existing CCTV footage, any length</span></li>
+          <li><b>2 s windows</b><span>Cut into back-to-back 2-second segments; a few frames are sampled from each</span></li>
+          <li><b>Model</b><span>Each segment gets a fight score from 0 to 1</span></li>
+          <li><b>Threshold</b><span>Segments at or above the threshold are "hot"</span></li>
+          <li><b>Alert</b><span>Consecutive hot segments merge into one alert for a human operator</span></li>
+        </ol>
+        <p class="muted small">Frames are analysed in memory on the local machine and never stored; only scores and short captions are saved. No face recognition, no identification.</p>
+      </section>
+      <section>
+        <h2>Models in use</h2>
+        <div id="model-cards" class="model-cards"></div>
+      </section>
+      <section>
+        <h2>Planned next</h2>
+        <div class="model-cards">
+          <div class="model-card planned">
+            <h3><span>Pose-based classifier</span><span class="badge zero">planned</span></h3>
+            <p>Extract body keypoints (skeletons) per person, then classify their movement over time with a graph network (e.g. ST-GCN). Sees motion and interaction, not appearance, so it is privacy-preserving by design. This is the core of the research.</p>
+          </div>
+          <div class="model-card planned">
+            <h3><span>Fine-tuned video model</span><span class="badge zero">planned</span></h3>
+            <p>Fully fine-tune a video transformer (e.g. VideoMAE) on fight data instead of only training a head. Usually the strongest RGB baseline, but heavier to run and looks at raw pixels.</p>
+          </div>
+          <div class="model-card planned">
+            <h3><span>Larger VLM as a second opinion</span><span class="badge zero">planned</span></h3>
+            <p>A 2–7B vision-language model (e.g. Qwen2.5-VL) that only looks at clips a fast model already flagged, to explain or veto them. Aims to cut false alarms without running the slow model on every feed.</p>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
