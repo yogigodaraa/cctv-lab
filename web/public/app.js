@@ -448,6 +448,46 @@ function renderTimelines() {
       onSeek: (t) => { $('player').currentTime = t; },
     });
   }
+  // Block strip: one 2 s block per segment, green (not fight) to red (fight); outlined at or above
+  // the threshold; ground truth on top. Hover a block for its verdict, click to seek.
+  if (done.length) {
+    const seek = (track) => (e) => {
+      const rect = track.getBoundingClientRect();
+      $('player').currentTime = ((e.clientX - rect.left) / rect.width) * duration;
+    };
+    const strip = el('div', { className: 'timelines' });
+    const row = (name, blocks) => {
+      const track = el('div', { className: 'track' }, [...blocks, el('div', { className: 'playhead', dataset: { playhead: '' } })]);
+      track.onclick = seek(track);
+      strip.append(el('div', { className: 'timeline' }, [el('span', { className: 'timeline-name', textContent: name }), track]));
+    };
+    const gt = Array.isArray(v?.gt_segments) ? v.gt_segments : null;
+    if (gt) {
+      row('ground truth', gt.length
+        ? gt.map((g) => el('div', {
+          className: 'seg gt', title: `Annotated fight ${fmtTime(g.start_s)}–${fmtTime(g.end_s)}`,
+          style: `left:${(g.start_s / duration) * 100}%;width:${Math.max(0.3, ((g.end_s - g.start_s) / duration) * 100)}%`,
+        }))
+        : [el('div', { className: 'track-status', textContent: 'no fight in this clip' })]);
+    }
+    for (const r of done) {
+      row(r.model, r.segments.map((g) => {
+        const hot = g.fight_score >= state.threshold;
+        return el('div', {
+          className: `seg ${hot ? 'over' : ''}`,
+          title: `${fmtTime(g.start_s)}–${fmtTime(g.end_s)} · ${hot ? 'FIGHT' : 'not fight'} · ${g.fight_score.toFixed(2)}${g.top_label ? ` · ${g.top_label}` : ''}`,
+          style: `left:${(g.start_s / duration) * 100}%;width:${((g.end_s - g.start_s) / duration) * 100}%;background:${scoreColor(g.fight_score)}`,
+        });
+      }));
+    }
+    strip.append(el('div', { className: 'strip-key muted small' }, [
+      el('span', { className: 'key-swatch', style: `background:${scoreColor(0)}` }), 'not fight',
+      el('span', { className: 'key-swatch', style: `background:${scoreColor(1)}` }), 'fight',
+      el('span', { className: 'key-swatch outline' }), `at or above threshold ${state.threshold.toFixed(2)} (alert)`,
+      el('span', { className: 'key-swatch gt-swatch' }), 'annotated fight',
+    ]));
+    wrap.append(strip);
+  }
   const pending = state.runs.filter((r) => r.status !== 'done');
   if (pending.length) {
     wrap.append(el('div', { className: 'run-status' }, pending.map((r) =>
@@ -596,6 +636,7 @@ function updatePlayhead() {
   const t = player.currentTime || 0;
   const duration = player.duration || selectedVideo()?.duration_s || 1;
   state.clipChart?.setTime(t);
+  document.querySelectorAll('[data-playhead]').forEach((p) => { p.style.left = `${(t / duration) * 100}%`; });
   $('cam-clock').textContent = fmtTime(t);
 
   const active = state.runs

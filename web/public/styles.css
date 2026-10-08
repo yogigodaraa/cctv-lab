@@ -313,3 +313,10 @@ table.backlog td:first-child { font-weight: 600; white-space: nowrap; }
 .st.done { color: var(--accent); border-color: var(--accent); }
 .st.running { color: var(--warn); border-color: var(--warn); }
 .st.error { color: var(--danger); border-color: var(--danger); }
+
+/* Block strip under the score chart */
+.timelines .track { height: 18px; }
+.strip-key { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 2px; }
+.key-swatch { width: 14px; height: 10px; border-radius: 2px; display: inline-block; }
+.key-swatch.outline { outline: 1.5px solid var(--danger); outline-offset: -1.5px; background: var(--panel-2); }
+.key-swatch.gt-swatch { background: repeating-linear-gradient(45deg, rgba(239, 75, 75, .85) 0 3px, rgba(239, 75, 75, .45) 3px 6px); }
