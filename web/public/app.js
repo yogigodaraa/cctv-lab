@@ -422,6 +422,8 @@ async function runModel(model) {
 }
 
 async function batchRun(model) {
+  const unscored = state.videos.filter((v) => !v.latest?.[model] || v.latest[model].status === 'error').length;
+  if (!confirm(`Queue ${model} on ${unscored} clip(s) that have no result yet? This runs on whichever worker is online (Mac or Kaggle).`)) return;
   const { queued } = await api('/runs/batch', { method: 'POST', body: { model } });
   alert(`Queued ${queued} video(s) for ${model}.`);
   refreshStatus();
@@ -674,7 +676,9 @@ $('upload-input').addEventListener('change', async (e) => {
 function switchTab(name) {
   state.tab = name;
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
-  for (const t of ['wall', 'monitor', 'eval', 'models', 'research']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  for (const t of ['wall', 'monitor', 'eval', 'models', 'research', 'compute']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  clearInterval(state.computeTimer);
+  if (name === 'compute') { refreshCompute(); state.computeTimer = setInterval(refreshCompute, 10_000); }
   if (name === 'research') renderResearch();
   if (name === 'models') renderModelCards([]);
   if (name === 'wall') renderWall();
@@ -708,6 +712,55 @@ async function renderModelCards(rows) {
         el('div', {}, [el('span', { className: 'good', textContent: 'Strengths' }), el('ul', {}, info.pros.map((x) => el('li', { textContent: x })))]),
         el('div', {}, [el('span', { className: 'bad', textContent: 'Weaknesses' }), el('ul', {}, info.cons.map((x) => el('li', { textContent: x })))]),
       ])] : []),
+    ]);
+  }));
+}
+
+// ---------- compute ----------
+
+const ago = (t) => {
+  if (!t) return '–';
+  const s = (Date.now() - new Date(t).getTime()) / 1000;
+  return s < 60 ? `${Math.round(s)} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : new Date(t).toLocaleDateString();
+};
+
+async function refreshCompute() {
+  const c = await api('/compute').catch(() => null);
+  if (!c) return;
+  const online = c.workers.filter((w) => w.online).length;
+  $('workers-count').textContent = `· ${online} online`;
+  $('worker-cards').replaceChildren(...(c.workers.length ? c.workers.map((w) => {
+    const kind = w.id.startsWith('kaggle') ? 'Kaggle GPU' : /mac|local/i.test(w.id) ? 'Mac' : 'Worker';
+    return el('div', { className: `worker-card ${w.online ? 'on' : ''}` }, [
+      el('div', { className: 'wname' }, [el('span', { className: 'live-dot' }), el('span', { textContent: w.id }), el('span', { className: 'badge zero', textContent: kind })]),
+      el('div', { className: 'wmeta', textContent: `${w.online ? 'Online' : 'Offline'} · ${w.device ?? ''}` }),
+      el('div', { className: 'wmeta', textContent: `Last seen ${ago(w.last_seen)} · ${w.runs_done} jobs done · last finished ${ago(w.last_finished)}` }),
+      el('div', { className: 'wmeta', textContent: `Models: ${(w.models ?? []).map((m) => m.name).join(', ') || '–'}` }),
+    ]);
+  }) : [el('p', { className: 'muted', textContent: 'No worker has connected yet.' })]));
+
+  $('compute-videos').textContent = c.videos;
+  $('queue-body').replaceChildren(...c.queue.map((q) => {
+    const canQueue = state.models.some((m) => m.name === q.model);
+    return el('tr', {}, [
+      el('td', { textContent: q.model }), el('td', { textContent: q.queued }), el('td', { textContent: q.running }),
+      el('td', { textContent: q.done }), el('td', { textContent: q.error }), el('td', { textContent: q.ms_per_segment ?? '–' }),
+      el('td', { textContent: `${Math.round((100 * q.done) / Math.max(1, c.videos))}%` }),
+      el('td', {}, canQueue ? el('button', { className: 'ghost', textContent: 'Queue unscored', onclick: async () => { await batchRun(q.model); refreshCompute(); } }) : el('span', { className: 'muted small', textContent: q.model === 'xclip-probe' ? 'trained offline' : '' })),
+    ]);
+  }));
+
+  $('jobs-body').replaceChildren(...c.recent.map((r) => {
+    const took = r.started_at && r.finished_at ? (new Date(r.finished_at) - new Date(r.started_at)) / 1000 : null;
+    return el('tr', {}, [
+      el('td', { textContent: ago(r.finished_at ?? r.started_at ?? r.created_at) }),
+      el('td', { textContent: r.model }),
+      el('td', { textContent: `${r.video} (${fmtDur(r.duration_s)})` }),
+      el('td', {}, el('span', { className: `st ${r.status}`, title: r.error ?? '', textContent: r.status })),
+      el('td', { textContent: r.worker_id ?? '–' }),
+      el('td', { textContent: r.segments ?? '–' }),
+      el('td', { textContent: r.ms_per_segment ? Math.round(r.ms_per_segment) : '–' }),
+      el('td', { textContent: took === null ? '–' : took < 90 ? `${Math.round(took)} s` : `${(took / 60).toFixed(1)} min` }),
     ]);
   }));
 }
