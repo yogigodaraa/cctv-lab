@@ -19,10 +19,12 @@ versioned and reviewable); `~/Downloads/Projects/kaggle/cctv-lab-worker` is a sy
 - The notebook clones `main` of the public repo at run time, so worker code changes go
   through a cctv-lab PR, not here.
 
-## Secret
-`WORKER_TOKEN` in Kaggle (notebook > Add-ons > Secrets), same value as `WORKER_TOKEN` in the
-cctv-lab Vercel env (`app/web/.env.local` locally). Never put it in the notebook or in git.
-Secrets cannot be set from the CLI: the user attaches it once in the Kaggle UI.
+## Token
+Default: private dataset `yogigodara/cctv-lab-worker-token` (file `worker_token.txt`), attached in
+`kernel-metadata.json`; verified not publicly accessible. Optional override: a Kaggle Secret
+`WORKER_TOKEN` (notebook > Add-ons > Secrets), used first when present (secrets cannot be set from
+the CLI). Same value as `WORKER_TOKEN` in the cctv-lab Vercel env (`app/web/.env.local`). Never
+put it in the notebook or in git.
 
 ## Commands
 ```bash
