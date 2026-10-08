@@ -29,6 +29,7 @@
         <button class="tab" data-tab="monitor">Investigate</button>
         <button class="tab" data-tab="eval">Evaluation</button>
         <button class="tab" data-tab="models">Models</button>
+        <button class="tab" data-tab="research">Research</button>
       </nav>
       <div class="status">
         <span id="worker-pill" class="pill">Worker: checking…</span>
@@ -191,6 +192,38 @@
             <p>A 2–7B vision-language model (e.g. Qwen2.5-VL) that only looks at clips a fast model already flagged, to explain or veto them. Aims to cut false alarms without running the slow model on every feed.</p>
           </div>
         </div>
+      </section>
+    </main>
+    <main id="tab-research" class="research-page hidden">
+      <section>
+        <h2>Research questions</h2>
+        <p class="lead">Measure what privacy costs in fight detection, and cut false alarms on look-alike activities, on hardware a CCTV site already has.</p>
+        <div id="rq-cards" class="rq-cards"></div>
+      </section>
+      <section>
+        <h2>Experiment plan <span id="exp-count" class="muted"></span></h2>
+        <div id="experiments" class="experiments"></div>
+      </section>
+      <section>
+        <div class="library-head">
+          <h2>Models to test <span id="backlog-count" class="muted"></span></h2>
+          <select id="backlog-filter" aria-label="Filter by family"></select>
+        </div>
+        <div class="table-wrap backlog-wrap"><table class="backlog">
+          <thead><tr><th>Model</th><th>From</th><th>Family</th><th>Size</th><th>Input</th><th>Experiments</th><th>Why test it</th></tr></thead>
+          <tbody id="backlog-body"></tbody>
+        </table></div>
+        <p class="muted small">Sizes are published parameter counts. Check each licence before use: several are research-only or AGPL.</p>
+      </section>
+      <section>
+        <div class="library-head">
+          <h2>Literature <span id="lit-count" class="muted"></span></h2>
+          <div class="wall-controls">
+            <select id="lit-theme" aria-label="Filter by theme"></select>
+            <select id="lit-rq" aria-label="Filter by research question"></select>
+          </div>
+        </div>
+        <div id="papers" class="papers"></div>
       </section>
     </main>
   </div>

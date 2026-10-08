@@ -1,4 +1,5 @@
 import { upload } from 'https://esm.sh/@vercel/blob@2.8.0/client';
+import { EXPERIMENTS, MODEL_BACKLOG, PAPERS, RESEARCH_QUESTIONS, THEMES } from './literature.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -669,7 +670,8 @@ $('upload-input').addEventListener('change', async (e) => {
 function switchTab(name) {
   state.tab = name;
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
-  for (const t of ['wall', 'monitor', 'eval', 'models']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  for (const t of ['wall', 'monitor', 'eval', 'models', 'research']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  if (name === 'research') renderResearch();
   if (name === 'models') renderModelCards([]);
   if (name === 'wall') renderWall();
   else $('wall-grid').querySelectorAll('video').forEach((v) => v.pause());
@@ -704,6 +706,66 @@ async function renderModelCards(rows) {
       ])] : []),
     ]);
   }));
+}
+
+// ---------- research ----------
+
+const rqChips = (ids) => ids.map((id) => el('span', { className: 'rq', title: RESEARCH_QUESTIONS[id - 1].text, textContent: `RQ${id}` }));
+
+function renderResearch() {
+  $('rq-cards').replaceChildren(...RESEARCH_QUESTIONS.map((q) => el('div', { className: 'rq-card' }, [
+    el('b', { textContent: `RQ${q.id} · ${q.short}` }),
+    el('span', { textContent: q.text }),
+    el('span', { className: 'muted', textContent: `${EXPERIMENTS.filter((e) => e.rq.includes(q.id)).length} experiments · ${PAPERS.filter((p) => p.rq.includes(q.id)).length} papers` }),
+  ])));
+
+  const statuses = ['done', 'running', 'next', 'planned'];
+  $('exp-count').textContent = `· ${statuses
+    .map((status) => [status, EXPERIMENTS.filter((e) => e.status === status).length])
+    .filter(([, count]) => count > 0)
+    .map(([status, count]) => `${count} ${status}`)
+    .join(', ')}`;
+  $('experiments').replaceChildren(...EXPERIMENTS.map((e) => el('div', { className: 'exp' }, [
+    el('span', { className: 'exp-id', textContent: e.id }),
+    el('div', { className: 'exp-head' }, [el('b', { textContent: e.title }), el('span', { className: `status ${e.status}`, textContent: e.status }), ...rqChips(e.rq)]),
+    el('p', { textContent: `Hypothesis: ${e.hypothesis}` }),
+    el('p', { className: e.result ? 'result' : '', textContent: e.result ? `Result: ${e.result}` : `Method: ${e.method}` }),
+  ])));
+
+  const families = [...new Set(MODEL_BACKLOG.map((m) => m.family))];
+  const bf = $('backlog-filter');
+  if (!bf.options.length) {
+    bf.append(el('option', { value: 'all', textContent: 'All families' }), ...families.map((f) => el('option', { value: f, textContent: f })));
+    bf.addEventListener('change', renderResearch);
+  }
+  const models = MODEL_BACKLOG.filter((m) => bf.value === 'all' || m.family === bf.value);
+  $('backlog-count').textContent = `· ${models.length} of ${MODEL_BACKLOG.length}`;
+  $('backlog-body').replaceChildren(...models.map((m) => el('tr', {}, [
+    m.name, m.org, m.family, m.size, m.input, m.exp.join(', '), m.note,
+  ].map((c) => el('td', { textContent: c })))));
+
+  const theme = $('lit-theme'), rq = $('lit-rq');
+  if (!theme.options.length) {
+    theme.append(el('option', { value: 'all', textContent: 'All themes' }), ...Object.entries(THEMES).map(([k, v]) => el('option', { value: k, textContent: v })));
+    rq.append(el('option', { value: 'all', textContent: 'All questions' }), ...RESEARCH_QUESTIONS.map((q) => el('option', { value: String(q.id), textContent: `RQ${q.id} · ${q.short}` })));
+    theme.addEventListener('change', renderResearch);
+    rq.addEventListener('change', renderResearch);
+  }
+  const papers = PAPERS.filter((p) => (theme.value === 'all' || p.theme === theme.value) && (rq.value === 'all' || p.rq.includes(Number(rq.value))));
+  $('lit-count').textContent = `· ${papers.length} of ${PAPERS.length}`;
+  $('papers').replaceChildren(...papers.map((p) => el('article', { className: 'paper' }, [
+    el('div', { className: 'tags' }, [
+      el('span', { className: 'badge zero', textContent: THEMES[p.theme] }),
+      ...(p.used ? [el('span', { className: 'badge trained', textContent: 'used in CCTV Lab' })] : []),
+      ...(p.uwa ? [el('span', { className: 'badge uwa', textContent: 'UWA' })] : []),
+      ...rqChips(p.rq),
+    ]),
+    el('h3', {}, el('a', { href: p.url, target: '_blank', rel: 'noopener', textContent: p.title })),
+    el('div', { className: 'meta', textContent: `${p.authors} · ${p.venue} ${p.year}` }),
+    el('dl', {}, [
+      ['Offers', p.offers], ['Why', p.why], ['Limit', p.limit], ['Ask', p.question],
+    ].flatMap(([k, v]) => [el('dt', { textContent: k }), el('dd', { textContent: v })])),
+  ])));
 }
 
 async function refreshMetrics() {
