@@ -260,3 +260,31 @@ table.backlog td:first-child { font-weight: 600; white-space: nowrap; }
 .papers { max-height: 520px; padding-right: 4px; }
 .tiles { max-height: 520px; padding-right: 4px; }
 .research-page { gap: 20px; }
+
+/* Charts */
+.chart { position: relative; }
+.chart svg { display: block; touch-action: pan-y; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font: 11px var(--mono); color: var(--muted); margin-bottom: 6px; }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.chart-tip { position: absolute; pointer-events: none; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: 11px/1.5 var(--mono); color: var(--text); white-space: nowrap; z-index: 5; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.chart-tip .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+.eval-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+.chart-card { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 8px; align-content: start; }
+.chart-card figcaption { display: grid; gap: 2px; font-size: 13px; }
+.chart-card figcaption .muted { font-size: 12px; }
+.radar svg { margin: 0 auto; }
+.clip-chart { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; margin: 12px 0; }
+.run-status { font: 11px var(--mono); color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }
+.clip-results-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 900px) { .clip-results-grid { grid-template-columns: 1fr; } }
+.clip-results .training-note { min-width: 220px; max-width: 320px; }
+.clip-results-grid { grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); }
+
+.paper .abstract summary { cursor: pointer; font-size: 12px; color: var(--accent); }
+.paper .abstract p { margin: 6px 0 0; font-size: 12px; line-height: 1.55; color: var(--text); max-height: 180px; overflow: auto; }
+.paper-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.paper-actions .button { min-height: 32px; padding: 4px 10px; font-size: 12px; text-decoration: none; }
+.ghost-link { font-size: 12px; color: var(--muted); }
+.clip-results-grid { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); }
+.clip-results .training-note { min-width: 150px; max-width: 260px; }

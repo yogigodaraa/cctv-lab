@@ -72,3 +72,30 @@ export function footageMetrics(runs) {
     gt_caught: gtCaught,
   };
 }
+
+// Threshold sweep for the Evaluation charts: per threshold, operator-level
+// false alarms/h and fights caught, plus segment-level TPR/FPR (ROC).
+export function sweep(runs, thresholds) {
+  const ov = (a, b) => Math.max(0, Math.min(a.end_s, b.end_s) - Math.max(a.start_s, b.start_s));
+  const labelled = runs.map((r) => ({
+    ...r,
+    segs: r.segments.map((s) => ({
+      ...s,
+      y: Array.isArray(r.gt_segments) && r.gt_segments.reduce((a, g) => a + ov(s, g), 0) >= 0.5 * (s.end_s - s.start_s),
+    })),
+  }));
+  let pos = 0, neg = 0;
+  for (const r of labelled) for (const s of r.segs) s.y ? pos++ : neg++;
+  return thresholds.map((t) => {
+    let tp = 0, fp = 0;
+    for (const r of labelled) for (const s of r.segs) if (s.fight_score >= t) s.y ? tp++ : fp++;
+    const f = footageMetrics(labelled.map((r) => ({ ...r, hot: r.segs.filter((s) => s.fight_score >= t) })));
+    return {
+      threshold: t,
+      fa_per_hour: f.fa_per_hour,
+      event_recall: f.gt_total ? f.gt_caught / f.gt_total : null,
+      tpr: pos ? tp / pos : null,
+      fpr: neg ? fp / neg : null,
+    };
+  });
+}
