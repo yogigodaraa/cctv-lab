@@ -31,9 +31,15 @@ Serverless functions can't run PyTorch models (no GPU, small size limits), so in
 
 Neither model has been trained on violence data yet. These are baselines to beat.
 
-## Metrics
+## Views
 
-Label videos as fight / non-fight, then open **Evaluation**: accuracy, precision, recall, F1, **false positive rate** and ROC-AUC per model at an adjustable threshold, plus ms per segment.
+- **Camera wall**: 2×2 / 3×3 / 4×4 grid of looping feeds. Model scores replay in sync and a feed turns red when it is at or above the threshold. Fight and normal feeds are interleaved.
+- **Investigate**: one clip with a ground-truth track (frame-level annotations, when available) under each model's score timeline, merged alert events marked ✓ (overlaps an annotated fight) or ✗ (false alarm), and a footage library.
+- **Evaluation**: video-level accuracy, precision, recall, F1, FPR and ROC-AUC, plus operator-level **false alarms per hour** on normal footage and **fights caught** (annotated fight intervals with at least one overlapping alert).
+
+## Data
+
+Currently loaded: a UBI-Fights subset (long, frame-annotated CCTV footage; see `../data/ubi-fights/README.md`). The earlier 2 s SCF clips were removed on 2026-10-08; their scores are in `../experiments/2026-10-03-scf-runs-backup.json`.
 
 ## Setup
 
@@ -61,6 +67,9 @@ The first run downloads model weights (~0.8 GB for X-CLIP, ~0.5 GB for SmolVLM).
 cd web
 npm run import -- /path/to/RWF-2000/val/Fight --label fight --limit 50
 npm run import -- /path/to/RWF-2000/val/NonFight --label nonfight --limit 50
+# with frame-level annotations (UBI-Fights CSV format)
+npm run import -- ../../data/ubi-fights/UBI_FIGHTS/videos/fight --label fight --source ubi-fights \
+  --annotations ../../data/ubi-fights/UBI_FIGHTS/annotation
 ```
 Check dataset licences first. Most violence datasets are research-only.
 

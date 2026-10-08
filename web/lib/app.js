@@ -4,7 +4,7 @@ import { handleUpload } from '@vercel/blob/client';
 
 import { checkPasscode, clearSession, hasSession, requireSession, requireWorker, setSession } from './auth.js';
 import { sql } from './db.js';
-import { confusion, rocAuc } from './metrics.js';
+import { confusion, footageMetrics, rocAuc } from './metrics.js';
 
 const WORKER_ONLINE_S = 45;
 const STALE_RUN_MIN = 20;
@@ -111,7 +111,10 @@ api.use(requireSession);
 api.get('/status', async (_req, res) => {
   const workers = await sql`
     SELECT id, device, models, last_seen,
-           last_seen > now() - make_interval(secs => ${WORKER_ONLINE_S}) AS online
+           last_seen > now() - make_interval(secs => ${WORKER_ONLINE_S})
+             -- A worker busy on a long video sends no heartbeat until it finishes.
+             OR EXISTS (SELECT 1 FROM runs r WHERE r.worker_id = workers.id AND r.status = 'running'
+                        AND r.started_at > now() - make_interval(mins => ${STALE_RUN_MIN})) AS online
     FROM workers ORDER BY last_seen DESC`;
   const [queue] = await sql`
     SELECT count(*) FILTER (WHERE status = 'queued')::int AS queued,
@@ -226,23 +229,34 @@ api.post('/runs/batch', async (req, res) => {
 api.get('/metrics', async (req, res) => {
   const threshold = Number.parseFloat(req.query.threshold ?? '0.5');
   const rows = await sql`
-    SELECT DISTINCT ON (r.video_id, r.model) r.model, v.label,
+    SELECT DISTINCT ON (r.video_id, r.model) r.id, r.model, v.label, v.duration_s, v.gt_segments,
            (SELECT max(fight_score) FROM segments s WHERE s.run_id = r.id) AS max_score,
            (r.timing->>'ms_per_segment')::real AS ms_per_segment
     FROM runs r JOIN videos v ON v.id = r.video_id
     WHERE r.status = 'done' AND v.label <> 'unknown'
     ORDER BY r.video_id, r.model, r.created_at DESC`;
+  const hot = rows.length
+    ? await sql`SELECT run_id, start_s, end_s FROM segments
+                WHERE run_id = ANY(${rows.map((r) => r.id)}) AND fight_score >= ${threshold}`
+    : [];
+  const hotByRun = new Map();
+  for (const s of hot) {
+    if (!hotByRun.has(s.run_id)) hotByRun.set(s.run_id, []);
+    hotByRun.get(s.run_id).push(s);
+  }
   const byModel = new Map();
   for (const r of rows) {
     if (r.max_score === null) continue;
     if (!byModel.has(r.model)) byModel.set(r.model, []);
-    byModel.get(r.model).push(r);
+    byModel.get(r.model).push({ ...r, hot: hotByRun.get(r.id) ?? [] });
   }
   const result = [...byModel].map(([model, rs]) => ({
     model,
     threshold,
     ...confusion(rs, threshold),
     roc_auc: rocAuc(rs),
+    ...footageMetrics(rs),
+    hours: rs.reduce((a, r) => a + (r.duration_s ?? 0), 0) / 3600,
     avg_ms_per_segment: rs.reduce((a, r) => a + (r.ms_per_segment ?? 0), 0) / rs.length,
   }));
   res.json(result);
