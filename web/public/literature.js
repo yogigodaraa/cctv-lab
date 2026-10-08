@@ -298,7 +298,8 @@ export function pdfFor(p) {
   const m = p.url.match(/arxiv\.org\/abs\/(\d+\.\d+)/);
   if (m) return `https://arxiv.org/pdf/${m[1]}`;
   if (p.url.endsWith('.pdf')) return p.url;
-  if (p.url.includes('openaccess.thecvf.com') && p.url.includes('/html/')) return p.url.replace('/html/', '/papers/').replace(/\.html$/, '.pdf');
+  const u = new URL(p.url);
+  if (u.hostname === 'openaccess.thecvf.com' && u.pathname.includes('/html/')) return p.url.replace('/html/', '/papers/').replace(/\.html$/, '.pdf');
   return null;
 }
 export const abstractFor = (p) => ABSTRACTS[p.url.match(/arxiv\.org\/abs\/(\d+\.\d+)/)?.[1]] ?? null;

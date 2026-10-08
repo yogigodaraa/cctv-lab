@@ -13,6 +13,8 @@ const svgEl = (tag, attrs = {}, children = []) => {
   for (const c of children) n.append(c);
   return n;
 };
+// Tooltips are built as HTML; model names come from the database, so escape them.
+const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const text = (x, y, str, attrs = {}) => {
   const t = svgEl('text', { x, y, fill: 'var(--muted)', 'font-size': 11, 'font-family': 'var(--mono)', ...attrs });
   t.textContent = str;
@@ -43,7 +45,7 @@ function legend(series) {
   box.className = 'chart-legend';
   for (const s of series) {
     const item = document.createElement('span');
-    item.innerHTML = `<i style="background:${s.color}"></i>${s.label ?? s.name}`;
+    item.innerHTML = `<i style="background:${s.color}"></i>${esc(s.label ?? s.name)}`;
     box.append(item);
   }
   return box;
@@ -126,7 +128,7 @@ export function tradeoffChart(container, curves, threshold) {
     y: { scale: (v) => v, fmt: (v) => `${Math.round(v * 100)}%` },
     xTicks: ticks, yTicks: [0, 0.25, 0.5, 0.75, 1],
     xTitle: 'False alarms per hour of normal footage (log scale)', yTitle: 'Fights caught',
-    tip: (s, p) => `<b>${s.name}</b> · threshold ${p.threshold.toFixed(2)}<br>${p.fa_per_hour.toFixed(1)} false alarms/h<br>${Math.round(p.event_recall * 100)}% of fights caught`,
+    tip: (s, p) => `<b>${esc(s.name)}</b> · threshold ${p.threshold.toFixed(2)}<br>${p.fa_per_hour.toFixed(1)} false alarms/h<br>${Math.round(p.event_recall * 100)}% of fights caught`,
   });
 }
 
@@ -142,7 +144,7 @@ export function rocChart(container, curves, threshold) {
     y: { scale: (v) => v, fmt: (v) => `${Math.round(v * 100)}%` },
     xTicks: [0, 0.25, 0.5, 0.75, 1], yTicks: [0, 0.25, 0.5, 0.75, 1], diagonal: true,
     xTitle: 'False positive rate (2 s segments)', yTitle: 'True positive rate',
-    tip: (s, p) => `<b>${s.name}</b> · threshold ${p.threshold.toFixed(2)}<br>TPR ${Math.round(p.y * 100)}% · FPR ${Math.round(p.x * 100)}%`,
+    tip: (s, p) => `<b>${esc(s.name)}</b> · threshold ${p.threshold.toFixed(2)}<br>TPR ${Math.round(p.y * 100)}% · FPR ${Math.round(p.x * 100)}%`,
   });
 }
 
@@ -195,7 +197,7 @@ export function clipChart(container, { runs, gt, duration, threshold, onSeek }) 
     cross.setAttribute('x1', xv); cross.setAttribute('x2', xv); cross.setAttribute('visibility', 'visible');
     const rows = series.map((s) => {
       const g = s.segs.find((q) => t >= q.start_s && t < q.end_s);
-      return g ? `<span style="color:var(--text)"><i class="dot" style="background:${s.color}"></i>${s.name} ${g.fight_score.toFixed(2)}</span>` : '';
+      return g ? `<span style="color:var(--text)"><i class="dot" style="background:${s.color}"></i>${esc(s.name)} ${g.fight_score.toFixed(2)}</span>` : '';
     }).filter(Boolean);
     const inGt = (gt ?? []).some((g) => t >= g.start_s && t < g.end_s);
     tip.show(`<b>${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}</b>${inGt ? ' · annotated fight' : ''}<br>${rows.join('<br>')}`, (xv / W) * r.width, 40);
@@ -245,7 +247,7 @@ export function radarChart(container, { axes, series, size = 260 }) {
       const hit = svgEl('circle', { cx: x, cy: y, r: 11, fill: 'transparent' });
       hit.addEventListener('pointerenter', () => {
         const r = svg.getBoundingClientRect();
-        tip.show(`<b>${s.name}</b><br>${axes[i].label}: ${vals[i].toFixed(2)}${axes[i].hint ? `<br><span class="muted">${axes[i].hint}</span>` : ''}`, (x / W) * r.width, (y / H) * r.height);
+        tip.show(`<b>${esc(s.name)}</b><br>${esc(axes[i].label)}: ${vals[i].toFixed(2)}${axes[i].hint ? `<br><span class="muted">${esc(axes[i].hint)}</span>` : ''}`, (x / W) * r.width, (y / H) * r.height);
       });
       hit.addEventListener('pointerleave', () => tip.hide());
       svg.append(dot, hit);
