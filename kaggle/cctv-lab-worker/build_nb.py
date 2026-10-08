@@ -15,8 +15,11 @@ notebook output, /tmp is discarded), the worker keeps at most one clip
 (CACHE_MAX=1 evicts the previous clip on each download) and the cache is deleted
 when the session ends, whatever the outcome.
 
-Secret required (Kaggle notebook > Add-ons > Secrets): WORKER_TOKEN
-(the same value as WORKER_TOKEN in cctv-lab's Vercel env / app/web/.env.local).
+Token: Kaggle Secret WORKER_TOKEN if attached; otherwise the private dataset
+yogigodara/cctv-lab-worker-token (file worker_token.txt), attached via
+kernel-metadata.json. Kaggle has no API for notebook secrets, so the private
+dataset lets the notebook be set up and run entirely from the CLI. Same value as
+WORKER_TOKEN in cctv-lab's Vercel env / app/web/.env.local.
 Never hand-edit notebook.ipynb: edit this file and run `python3 build_nb.py`.
 """
 import json
@@ -40,16 +43,20 @@ REPO = "https://github.com/yogigodaraa/cctv-lab.git"
 IDLE_MIN = 20     # stop after this many minutes with no new job
 MAX_HOURS = 11.5  # Kaggle sessions end at 12 h
 
-import os, subprocess
+import glob, os, subprocess
+WORKER_TOKEN, source = None, None
 try:
     from kaggle_secrets import UserSecretsClient
-    WORKER_TOKEN = UserSecretsClient().get_secret("WORKER_TOKEN")
-except Exception as e:
-    WORKER_TOKEN = None
-    print("Could not read secret:", type(e).__name__)
+    WORKER_TOKEN, source = UserSecretsClient().get_secret("WORKER_TOKEN"), "Kaggle secret"
+except Exception:
+    pass
+if not WORKER_TOKEN:  # fallback: private dataset attached in kernel-metadata.json
+    files = glob.glob("/kaggle/input/**/worker_token.txt", recursive=True)
+    if files:
+        WORKER_TOKEN, source = open(files[0]).read().strip(), "private dataset"
 if not WORKER_TOKEN:
-    raise RuntimeError("Add the WORKER_TOKEN secret (Add-ons > Secrets), switch it on for this notebook, then run again.")
-print("WORKER_TOKEN loaded (hidden).")
+    raise RuntimeError("No WORKER_TOKEN: add it under Add-ons > Secrets, or attach the private dataset cctv-lab-worker-token.")
+print(f"WORKER_TOKEN loaded from {source} (hidden).")
 gpu = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True).stdout.strip()
 print("GPU:", gpu or "none (turn on Accelerator = GPU)")
 """.strip()
@@ -70,7 +77,7 @@ print("torch", torch.__version__, "| CUDA:", torch.cuda.is_available())
 C3 = r"""
 # Run the worker until the queue stays empty (IDLE_MIN) or MAX_HOURS is reached
 import os, subprocess, sys, time, threading, queue
-worker_id = "kaggle-" + ((gpu.split(",")[0].replace("Tesla ", "").replace(" ", "-")) if gpu else "cpu")
+worker_id = "kaggle-" + ((gpu.splitlines()[0].split(",")[0].replace("Tesla ", "").replace(" ", "-")) if gpu else "cpu")
 # CACHE_MAX=1: the worker evicts the previous clip on every download, so at most one clip is on disk.
 env = {**os.environ, "API_BASE": API_BASE, "WORKER_TOKEN": WORKER_TOKEN, "WORKER_ID": worker_id,
        "CACHE_DIR": CACHE, "CACHE_MAX": "1", "TOKENIZERS_PARALLELISM": "false"}
