@@ -62,6 +62,13 @@ API_BASE=https://<your-app-url> WORKER_TOKEN=<token> python worker.py
 ```
 The first run downloads model weights (~0.8 GB for X-CLIP, ~0.5 GB for SmolVLM).
 
+### Worker on Kaggle (free GPU)
+A private Kaggle notebook runs the same worker on a Kaggle GPU: `yogigodara/cctv-lab-worker`
+(built from `~/Downloads/Projects/kaggle/cctv-lab-worker/build_nb.py`). It clones this repo,
+reads `WORKER_TOKEN` from Kaggle Secrets, drains the queue against the live site and stops after
+20 idle minutes. Results land in the database as each job finishes; the **Compute** tab shows
+workers, the queue and recent jobs.
+
 ### Bulk import (e.g. a labelled dataset subset)
 ```bash
 cd web

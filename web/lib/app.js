@@ -266,6 +266,36 @@ api.get('/metrics', async (req, res) => {
   res.json(result);
 });
 
+// Compute tab: who is running models (Mac, Kaggle...), the queue, recent jobs.
+api.get('/compute', async (_req, res) => {
+  const workers = await sql`
+    SELECT id, device, models, last_seen,
+           last_seen > now() - make_interval(secs => ${WORKER_ONLINE_S})
+             OR EXISTS (SELECT 1 FROM runs r WHERE r.worker_id = workers.id AND r.status = 'running'
+                        AND r.started_at > now() - make_interval(mins => ${STALE_RUN_MIN})) AS online,
+           (SELECT count(*)::int FROM runs r WHERE r.worker_id = workers.id AND r.status = 'done') AS runs_done,
+           (SELECT max(finished_at) FROM runs r WHERE r.worker_id = workers.id) AS last_finished
+    FROM workers ORDER BY last_seen DESC`;
+  const queue = await sql`
+    SELECT model,
+           count(*) FILTER (WHERE status = 'queued')::int AS queued,
+           count(*) FILTER (WHERE status = 'running')::int AS running,
+           count(*) FILTER (WHERE status = 'done')::int AS done,
+           count(*) FILTER (WHERE status = 'error')::int AS error,
+           round(avg((timing->>'ms_per_segment')::real) FILTER (WHERE status = 'done'))::int AS ms_per_segment
+    FROM runs GROUP BY model ORDER BY model`;
+  const [{ videos }] = await sql`SELECT count(*)::int AS videos FROM videos`;
+  const recent = await sql`
+    SELECT r.id, r.model, r.status, r.error, r.worker_id, r.device, r.created_at, r.started_at, r.finished_at,
+           (r.timing->>'segments')::int AS segments, (r.timing->>'ms_per_segment')::real AS ms_per_segment,
+           v.name AS video, v.duration_s
+    FROM runs r JOIN videos v ON v.id = r.video_id
+    WHERE r.worker_id IS NOT NULL OR r.status <> 'done'
+    ORDER BY COALESCE(r.finished_at, r.started_at, r.created_at) DESC
+    LIMIT 40`;
+  res.json({ workers, queue, videos, recent });
+});
+
 // Curves for the Evaluation charts. Only videos every listed model has scored,
 // so lines are compared on the same footage.
 api.get('/curves', async (_req, res) => {

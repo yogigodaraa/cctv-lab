@@ -291,3 +291,25 @@ table.backlog td:first-child { font-weight: 600; white-space: nowrap; }
 .ghost-link { font-size: 12px; color: var(--muted); }
 .clip-results-grid { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); }
 .clip-results .training-note { min-width: 150px; max-width: 260px; }
+
+/* Compute page */
+.compute-page { padding: 16px; display: grid; gap: 20px; max-width: 1400px; }
+.worker-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.worker-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 4px; }
+.worker-card.on { border-color: var(--accent); }
+.worker-card .wname { font: 600 13px var(--mono); display: flex; gap: 8px; align-items: center; }
+.worker-card .wmeta { font-size: 12px; color: var(--muted); }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.worker-card.on .live-dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.kaggle-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 8px; }
+.kaggle-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.kaggle-head h2 { margin: 0; }
+.kaggle-head .button { text-decoration: none; }
+.steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13px; }
+.steps code, .kaggle-card code { font: 12px var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
+.jobs-wrap { max-height: 380px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+.jobs-wrap thead th { position: sticky; top: 0; background: var(--panel); }
+.st { font: 600 10px var(--mono); text-transform: uppercase; padding: 2px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
+.st.done { color: var(--accent); border-color: var(--accent); }
+.st.running { color: var(--warn); border-color: var(--warn); }
+.st.error { color: var(--danger); border-color: var(--danger); }

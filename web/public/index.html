@@ -30,6 +30,7 @@
         <button class="tab" data-tab="eval">Evaluation</button>
         <button class="tab" data-tab="models">Models</button>
         <button class="tab" data-tab="research">Research</button>
+        <button class="tab" data-tab="compute">Compute</button>
       </nav>
       <div class="status">
         <span id="worker-pill" class="pill">Worker: checking…</span>
@@ -239,6 +240,39 @@
           </div>
         </div>
         <div id="papers" class="papers"></div>
+      </section>
+    </main>
+    <main id="tab-compute" class="compute-page hidden">
+      <section>
+        <h2>Workers <span id="workers-count" class="muted"></span></h2>
+        <div id="worker-cards" class="worker-cards"></div>
+      </section>
+      <section class="kaggle-card">
+        <div class="kaggle-head">
+          <h2>Kaggle GPU worker</h2>
+          <a class="button" href="https://www.kaggle.com/code/yogigodara/cctv-lab-worker" target="_blank" rel="noopener">Open notebook on Kaggle</a>
+        </div>
+        <ol class="steps">
+          <li><b>Queue work here</b>: upload clips, press a model's Run button, or "Queue unscored" below.</li>
+          <li><b>Start the notebook</b>: on Kaggle press <i>Run All</i> (or <i>Save Version → Save &amp; Run All</i> to run in the background). First time only: Add-ons → Secrets → add <code>WORKER_TOKEN</code> and switch it on; Settings → Accelerator GPU, Internet On.</li>
+          <li><b>Watch it here</b>: a worker named <code>kaggle-…</code> appears above as online, jobs move from queued to done below, and scores show up on every tab as each job finishes. Nothing to download.</li>
+          <li><b>It stops itself</b> after 20 minutes with no new job (or 11.5 h), so the free GPU quota (~30 h/week) is only spent on real work.</li>
+        </ol>
+        <p class="muted small">Scheduling: <code>kaggle kernels push</code> starts a new background run, so a timer (cron on any machine, or a scheduled GitHub Action with a Kaggle API token) can re-run it, e.g. nightly; each run drains the queue and stops. Keep the notebook private: it downloads research-only footage.</p>
+      </section>
+      <section>
+        <h2>Queue by model <span class="muted">· <span id="compute-videos"></span> clips</span></h2>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Model</th><th>Queued</th><th>Running</th><th>Done</th><th>Errors</th><th>ms / segment</th><th>Coverage</th><th></th></tr></thead>
+          <tbody id="queue-body"></tbody>
+        </table></div>
+      </section>
+      <section>
+        <h2>Recent jobs</h2>
+        <div class="table-wrap jobs-wrap"><table>
+          <thead><tr><th>When</th><th>Model</th><th>Clip</th><th>Status</th><th>Worker</th><th>Segments</th><th>ms / segment</th><th>Took</th></tr></thead>
+          <tbody id="jobs-body"></tbody>
+        </table></div>
       </section>
     </main>
   </div>
