@@ -149,6 +149,21 @@
         <div id="batch-buttons" class="run-buttons"></div>
       </div>
       <div id="eval-cards" class="eval-cards"></div>
+      <div class="eval-charts">
+        <figure class="chart-card">
+          <figcaption><b>Trade-off: false alarms vs fights caught</b><span class="muted">Each line sweeps the threshold; the dot is the current one. Up and to the left is better.</span></figcaption>
+          <div id="chart-tradeoff"></div>
+        </figure>
+        <figure class="chart-card">
+          <figcaption><b>ROC curve (2 s segments)</b><span class="muted">Threshold-free ranking quality; the dashed line is chance.</span></figcaption>
+          <div id="chart-roc"></div>
+        </figure>
+        <figure class="chart-card">
+          <figcaption><b>Overall profile at this threshold</b><span class="muted">Clip-level metrics; every axis 0–1, bigger shape is better.</span></figcaption>
+          <div id="chart-radar"></div>
+        </figure>
+      </div>
+      <p id="curves-note" class="muted small"></p>
       <div class="table-wrap">
         <table>
           <thead>

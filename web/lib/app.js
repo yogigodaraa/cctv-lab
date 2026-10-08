@@ -4,7 +4,7 @@ import { handleUpload } from '@vercel/blob/client';
 
 import { checkPasscode, clearSession, hasSession, requireSession, requireWorker, setSession } from './auth.js';
 import { sql } from './db.js';
-import { confusion, footageMetrics, rocAuc } from './metrics.js';
+import { confusion, footageMetrics, rocAuc, sweep } from './metrics.js';
 
 const WORKER_ONLINE_S = 45;
 const STALE_RUN_MIN = 20;
@@ -264,6 +264,48 @@ api.get('/metrics', async (req, res) => {
     avg_ms_per_segment: rs.reduce((a, r) => a + (r.ms_per_segment ?? 0), 0) / rs.length,
   }));
   res.json(result);
+});
+
+// Curves for the Evaluation charts. Only videos every listed model has scored,
+// so lines are compared on the same footage.
+api.get('/curves', async (_req, res) => {
+  const runs = await sql`
+    SELECT DISTINCT ON (r.video_id, r.model) r.id, r.video_id, r.model, v.label, v.duration_s, v.gt_segments
+    FROM runs r JOIN videos v ON v.id = r.video_id
+    WHERE r.status = 'done' AND v.label <> 'unknown'
+    ORDER BY r.video_id, r.model, r.created_at DESC`;
+  const byModel = new Map();
+  for (const r of runs) {
+    if (!byModel.has(r.model)) byModel.set(r.model, []);
+    byModel.get(r.model).push(r);
+  }
+  // Models covering at least half the footage take part; compare on their common videos.
+  const total = new Set(runs.map((r) => r.video_id)).size;
+  const models = [...byModel].filter(([, rs]) => rs.length >= total / 2).map(([m]) => m);
+  const common = [...new Set(runs.map((r) => r.video_id))]
+    .filter((id) => models.every((m) => byModel.get(m).some((r) => r.video_id === id)));
+  const keep = runs.filter((r) => models.includes(r.model) && common.includes(r.video_id));
+  const segs = keep.length
+    ? await sql`SELECT run_id, start_s, end_s, fight_score FROM segments WHERE run_id = ANY(${keep.map((r) => r.id)})`
+    : [];
+  const segByRun = new Map();
+  for (const s of segs) {
+    if (!segByRun.has(s.run_id)) segByRun.set(s.run_id, []);
+    segByRun.get(s.run_id).push(s);
+  }
+  const thresholds = Array.from({ length: 99 }, (_, i) => Math.round((0.01 + i * 0.01) * 100) / 100);
+  res.json({
+    videos: common.length,
+    models: models.map((m) => {
+      const rs = keep.filter((r) => r.model === m).map((r) => ({ ...r, segments: segByRun.get(r.id) ?? [] }));
+      const pts = sweep(rs, thresholds);
+      // Segment AUC by trapezoid over the sweep (plus the (0,0) and (1,1) ends).
+      const roc = [{ fpr: 1, tpr: 1 }, ...pts, { fpr: 0, tpr: 0 }];
+      let auc = 0;
+      for (let i = 1; i < roc.length; i++) auc += (roc[i - 1].fpr - roc[i].fpr) * (roc[i - 1].tpr + roc[i].tpr) / 2;
+      return { model: m, points: pts, segment_auc: auc };
+    }),
+  });
 });
 
 app.use('/api', api);

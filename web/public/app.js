@@ -1,5 +1,6 @@
 import { upload } from 'https://esm.sh/@vercel/blob@2.8.0/client';
-import { EXPERIMENTS, MODEL_BACKLOG, PAPERS, RESEARCH_QUESTIONS, THEMES } from './literature.js';
+import { clipChart, colorFor, radarChart, rocChart, tradeoffChart } from './charts.js';
+import { abstractFor, EXPERIMENTS, MODEL_BACKLOG, PAPERS, pdfFor, RESEARCH_QUESTIONS, THEMES } from './literature.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -427,48 +428,27 @@ async function batchRun(model) {
 }
 
 function renderTimelines() {
-  const duration = $('player').duration || selectedVideo()?.duration_s || 1;
+  const v = selectedVideo();
+  const duration = $('player').duration || v?.duration_s || 1;
   const wrap = $('timelines');
   wrap.replaceChildren();
-  const v = selectedVideo();
-  if (v && Array.isArray(v.gt_segments)) {
-    const track = el('div', { className: 'track gt-track', title: 'Frame-level ground truth (annotated fight intervals)' },
-      v.gt_segments.length
-        ? v.gt_segments.map((g) => el('div', {
-          className: 'seg gt',
-          title: `Fight ${fmtTime(g.start_s)}–${fmtTime(g.end_s)}`,
-          style: `left:${(g.start_s / duration) * 100}%;width:${Math.max(0.3, ((g.end_s - g.start_s) / duration) * 100)}%`,
-        }))
-        : [el('div', { className: 'track-status', textContent: 'no fight in this clip' })]);
-    track.append(el('div', { className: 'playhead', dataset: { playhead: '' } }));
-    track.onclick = (e) => {
-      const rect = track.getBoundingClientRect();
-      $('player').currentTime = ((e.clientX - rect.left) / rect.width) * duration;
-    };
-    wrap.append(el('div', { className: 'timeline' }, [el('span', { className: 'timeline-name', textContent: 'ground truth' }), track]));
+  state.clipChart = null;
+  const done = state.runs.filter((r) => r.status === 'done' && r.segments.length);
+  if (done.length) {
+    const box = el('div', { className: 'clip-chart' });
+    wrap.append(box);
+    state.clipChart = clipChart(box, {
+      runs: done,
+      gt: Array.isArray(v?.gt_segments) ? v.gt_segments : [],
+      duration,
+      threshold: state.threshold,
+      onSeek: (t) => { $('player').currentTime = t; },
+    });
   }
-  for (const run of state.runs) {
-    const track = el('div', { className: 'track' });
-    if (run.status === 'done') {
-      for (const s of run.segments) {
-        track.append(el('div', {
-          className: `seg ${s.fight_score >= state.threshold ? 'over' : ''}`,
-          title: `${fmtTime(s.start_s)}–${fmtTime(s.end_s)} · ${s.fight_score.toFixed(2)} · ${s.top_label ?? ''}`,
-          style: `left:${(s.start_s / duration) * 100}%;width:${((s.end_s - s.start_s) / duration) * 100}%;background:${scoreColor(s.fight_score)}`,
-        }));
-      }
-      track.append(el('div', { className: 'playhead', dataset: { playhead: '' } }));
-      track.onclick = (e) => {
-        const rect = track.getBoundingClientRect();
-        $('player').currentTime = ((e.clientX - rect.left) / rect.width) * duration;
-      };
-    } else {
-      track.append(el('div', {
-        className: 'track-status',
-        textContent: run.status === 'error' ? `error: ${run.error}` : `${run.status}…`,
-      }));
-    }
-    wrap.append(el('div', { className: 'timeline' }, [el('span', { className: 'timeline-name', textContent: run.model }), track]));
+  const pending = state.runs.filter((r) => r.status !== 'done');
+  if (pending.length) {
+    wrap.append(el('div', { className: 'run-status' }, pending.map((r) =>
+      el('span', { textContent: `${r.model}: ${r.status === 'error' ? `error: ${r.error}` : `${r.status}…`}` }))));
   }
   updatePlayhead();
   renderClipResults();
@@ -488,6 +468,7 @@ function renderClipResults() {
   const order = ['xclip-probe', 'xclip', 'smolvlm'];
   done.sort((a, b) => (order.indexOf(a.model) + 99) % 99 - (order.indexOf(b.model) + 99) % 99);
 
+  const radar = [];
   const rows = done.map((r) => {
     const info = modelInfo(r.model);
     let tp = 0, fp = 0, fn = 0, tn = 0;
@@ -518,6 +499,12 @@ function renderClipResults() {
       ? `Held out in fold ${tr.fold}/${tr.folds}. Trained on ${tr.train_videos} other clips (${tr.train_segments} segments, ${tr.train_fight_segments} fight); never saw this one.`
       : info.training;
     const pct = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : '–');
+    if (gt && gt.length) {
+      radar.push({ name: r.model, color: colorFor(r.model), values: {
+        auc, precision: tp + fp ? tp / (tp + fp) : 0, recall: tp + fn ? tp / (tp + fn) : null,
+        caught: caught / gt.length, onTarget: alerts.length ? matched / alerts.length : 0, specificity: tn + fp ? tn / (tn + fp) : null,
+      } });
+    }
     return el('tr', {}, [
       el('td', {}, [el('div', { textContent: r.model }), el('span', { className: `badge ${info.kind}`, textContent: info.kind === 'trained' ? 'trained · held-out' : 'zero-shot' })]),
       el('td', { textContent: auc === null ? '–' : auc.toFixed(2) }),
@@ -529,14 +516,31 @@ function renderClipResults() {
       el('td', { className: 'training-note', textContent: note }),
     ]);
   });
+  const radarBox = el('div');
   box.append(
     el('h3', { textContent: `How each model did on this clip · threshold ${t.toFixed(2)}` }),
-    el('div', { className: 'table-wrap' }, el('table', {}, [
+    el('div', { className: 'clip-results-grid' }, [radarBox, el('div', { className: 'table-wrap' }, el('table', {}, [
       el('thead', {}, el('tr', {}, ['Model', 'AUC', 'Precision', 'Recall', 'Alerts', v.label === 'nonfight' ? 'False alarms' : 'Outside fight', 'Fights caught', 'Training'].map((h) => el('th', { textContent: h })))),
       el('tbody', {}, rows),
-    ])),
-    el('p', { className: 'muted small', textContent: 'Segment-level, against the frame-level annotation: a 2 s segment is "fight" if at least half of it is annotated as fight. Precision/recall at the current threshold; AUC is threshold-free.' }),
+    ]))]),
+    el('p', { className: 'muted small', textContent: 'Segment-level, against the frame-level annotation: a 2 s segment is "fight" if at least half of it is annotated as fight. Precision/recall at the current threshold; AUC is threshold-free. Radar: every axis 0–1, further out is better.' }),
   );
+  if (radar.length) {
+    radarChart(radarBox, { size: 220, series: radar, axes: [
+      { key: 'auc', label: 'AUC', hint: 'Ranks fight segments above normal ones (threshold-free)' },
+      { key: 'precision', label: 'Precision', hint: 'Share of flagged segments that are really fight' },
+      { key: 'recall', label: 'Recall', hint: 'Share of fight segments flagged' },
+      { key: 'caught', label: 'Fights caught', hint: 'Annotated fight events with at least one alert' },
+      { key: 'onTarget', label: 'Alerts on target', hint: 'Share of alerts that overlap an annotated fight' },
+      { key: 'specificity', label: 'Specificity', hint: '1 − false positive rate on non-fight segments' },
+    ] });
+  } else {
+    const fa = done.map((r) => {
+      const n = r.segments.reduce((acc, s2, i, arr) => acc + (s2.fight_score >= t && !(i && arr[i - 1].fight_score >= t) ? 1 : 0), 0);
+      return `${r.model}: ${n} false alarm${n === 1 ? '' : 's'}`;
+    });
+    radarBox.append(el('p', { className: 'muted small', textContent: `Normal footage (no fight to catch), so the radar does not apply. At this threshold: ${fa.join(' · ')}.` }));
+  }
 }
 
 function renderEvents() {
@@ -588,7 +592,7 @@ function updatePlayhead() {
   const player = $('player');
   const t = player.currentTime || 0;
   const duration = player.duration || selectedVideo()?.duration_s || 1;
-  document.querySelectorAll('[data-playhead]').forEach((p) => { p.style.left = `${(t / duration) * 100}%`; });
+  state.clipChart?.setTime(t);
   $('cam-clock').textContent = fmtTime(t);
 
   const active = state.runs
@@ -765,12 +769,40 @@ function renderResearch() {
     el('dl', {}, [
       ['Offers', p.offers], ['Why', p.why], ['Limit', p.limit], ['Ask', p.question],
     ].flatMap(([k, v]) => [el('dt', { textContent: k }), el('dd', { textContent: v })])),
+    ...(abstractFor(p) ? [el('details', { className: 'abstract' }, [
+      el('summary', { textContent: 'Abstract (authors\' own words)' }),
+      el('p', { textContent: abstractFor(p) }),
+    ])] : []),
+    el('div', { className: 'paper-actions' }, [
+      ...(pdfFor(p) ? [el('a', { className: 'button', href: pdfFor(p), target: '_blank', rel: 'noopener', textContent: 'Read full paper (PDF)' })] : []),
+      el('a', { className: 'ghost-link', href: p.url, target: '_blank', rel: 'noopener', textContent: pdfFor(p) === p.url ? 'Publisher page' : 'Paper page ↗' }),
+    ]),
   ])));
+}
+
+async function renderEvalCharts(t, rows) {
+  if (!state.curves) state.curves = await api('/curves').catch(() => null);
+  const c = state.curves;
+  if (!c || !c.models.length) return;
+  tradeoffChart($('chart-tradeoff'), c.models, t);
+  rocChart($('chart-roc'), c.models, t);
+  const maxN = Math.max(...rows.map((r) => r.n));
+  radarChart($('chart-radar'), { size: 240, series: rows.filter((r) => r.n >= maxN / 2).map((r) => ({ name: r.model, color: colorFor(r.model), values: {
+    accuracy: r.accuracy, precision: r.precision, recall: r.recall, f1: r.f1, auc: r.roc_auc,
+    specificity: r.fpr === null ? null : 1 - r.fpr, caught: r.gt_total ? r.gt_caught / r.gt_total : null,
+  } })), axes: [
+    { key: 'accuracy', label: 'Accuracy' }, { key: 'precision', label: 'Precision' }, { key: 'recall', label: 'Recall' },
+    { key: 'f1', label: 'F1' }, { key: 'auc', label: 'ROC-AUC' },
+    { key: 'specificity', label: 'Specificity', hint: '1 − clip false positive rate' },
+    { key: 'caught', label: 'Fights caught', hint: 'Annotated fight events with an overlapping alert' },
+  ] });
+  $('curves-note').textContent = `Curves compare ${c.models.map((m) => m.model).join(', ')} on the ${c.videos} videos all of them scored. Models that have scored under half the footage (e.g. SmolVLM so far) are left out of the curves.`;
 }
 
 async function refreshMetrics() {
   const t = Number($('eval-threshold').value);
   const rows = await api(`/metrics?threshold=${t}`);
+  renderEvalCharts(t, rows);
   const body = $('metrics-body');
   body.replaceChildren();
   $('eval-cards').replaceChildren(...rows.map((r) => {
