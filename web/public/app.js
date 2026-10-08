@@ -27,6 +27,48 @@ const thumbObserver = new IntersectionObserver((entries) => {
   }
 }, { rootMargin: '200px' });
 
+// What each model is and how it was (or was not) trained. Trained models also get a
+// live summary from /api/model-cards (cross-validation numbers).
+const MODEL_INFO = {
+  xclip: {
+    kind: 'zero',
+    title: 'X-CLIP (zero-shot)',
+    type: 'Video–text model (contrastive, multimodal). Not generative.',
+    input: '8 frames per 2 s segment',
+    how: 'Compares each segment with text prompts: 4 violent ("people fighting", "a person punching…") vs 6 look-alikes (hugging, dancing, sport, walking, talking, empty). Score = probability mass on the violent prompts.',
+    training: 'None. Pretrained on Kinetics-400 by Microsoft; never shown fight data.',
+    plain: 'Think of it as a search engine that matches a short video against sentences. We ask: does this clip look more like "people fighting" or more like "people hugging / dancing / playing sport"?',
+    size: '~200M parameters · ViT-B/32 image encoder + temporal layers + text encoder',
+    pros: ['Sees motion (8 frames)', 'Fast: ~0.1 s per 2 s segment on a MacBook', 'No training needed'],
+    cons: ['Never saw fights, so it confuses fast motion with violence', 'Many false alarms on long footage', 'Looks at raw pixels, not just pose'],
+  },
+  smolvlm: {
+    kind: 'zero',
+    title: 'SmolVLM-256M (zero-shot VLM)',
+    type: 'Small generative vision-language model (image + text → text).',
+    input: '2 still frames per 2 s segment (no motion)',
+    how: 'Asked "Is anyone fighting…? Answer Yes or No." Score = P(Yes). Also writes a one-line caption for each alert.',
+    training: 'None. General instruction-tuned VLM; never shown fight data.',
+    plain: 'A tiny chatbot that can see pictures. We show it a frame and ask "Is anyone fighting? Yes or No", and read how confident it is in "Yes". It also describes the scene in one sentence.',
+    size: '256M parameters · SigLIP image encoder + SmolLM2 language model',
+    pros: ['Explains alerts in words', 'Prompt can be changed without retraining'],
+    cons: ['Single frames: cannot see motion', 'Very small, so it almost always answers "No"', 'Slowest: ~1 s per segment'],
+  },
+  'xclip-probe': {
+    kind: 'trained',
+    title: 'X-CLIP + trained head',
+    type: 'Frozen X-CLIP video features + logistic-regression classifier.',
+    input: '8 frames per 2 s segment',
+    how: 'X-CLIP turns each segment into a 512-d feature vector; a classifier trained on UBI-Fights frame-level labels scores it.',
+    training: '5-fold cross-validation grouped by video: each clip is scored by a model trained on the other ~80% of clips, never on itself.',
+    plain: 'Same X-CLIP "eyes", but instead of comparing with sentences we trained a small decision layer on real CCTV fights and normal footage, using the frame-by-frame labels that come with UBI-Fights.',
+    size: 'X-CLIP backbone (frozen) + 513 trained weights',
+    pros: ['Learns what CCTV fights actually look like', 'Trains in seconds on a laptop', 'Honest held-out evaluation'],
+    cons: ['Only as good as X-CLIP features', 'Small training set (~78 clips)', 'Still RGB, not pose'],
+  },
+};
+const modelInfo = (name) => MODEL_INFO[name] ?? { kind: 'zero', title: name, type: '', input: '', how: '', training: '', pros: [], cons: [] };
+
 // ---------- helpers ----------
 
 async function api(path, options = {}) {
@@ -428,6 +470,72 @@ function renderTimelines() {
     wrap.append(el('div', { className: 'timeline' }, [el('span', { className: 'timeline-name', textContent: run.model }), track]));
   }
   updatePlayhead();
+  renderClipResults();
+}
+
+// How each model did on this one clip, against the frame-level ground truth.
+function renderClipResults() {
+  const box = $('clip-results');
+  box.replaceChildren();
+  const v = selectedVideo();
+  const done = state.runs.filter((r) => r.status === 'done' && r.segments.length);
+  if (!v || !done.length) return;
+  const gt = Array.isArray(v.gt_segments) ? v.gt_segments : (v.label === 'nonfight' ? [] : null);
+  const overlap = (a, b) => Math.max(0, Math.min(a.end_s, b.end_s) - Math.max(a.start_s, b.start_s));
+  const isFightSeg = (s) => gt && gt.reduce((a, g) => a + overlap(s, g), 0) >= 0.5 * (s.end_s - s.start_s);
+  const t = state.threshold;
+  const order = ['xclip-probe', 'xclip', 'smolvlm'];
+  done.sort((a, b) => (order.indexOf(a.model) + 99) % 99 - (order.indexOf(b.model) + 99) % 99);
+
+  const rows = done.map((r) => {
+    const info = modelInfo(r.model);
+    let tp = 0, fp = 0, fn = 0, tn = 0;
+    const pos = [], neg = [];
+    for (const s of r.segments) {
+      const y = isFightSeg(s), hit = s.fight_score >= t;
+      if (gt) (y ? pos : neg).push(s.fight_score);
+      if (!gt) continue;
+      if (y) hit ? tp++ : fn++; else hit ? fp++ : tn++;
+    }
+    let auc = null;
+    if (pos.length && neg.length) {
+      let w = 0;
+      for (const p of pos) for (const q of neg) w += p > q ? 1 : p === q ? 0.5 : 0;
+      auc = w / (pos.length * neg.length);
+    }
+    // Alerts as an operator sees them (consecutive hot segments merged).
+    const alerts = [];
+    for (const s of r.segments) {
+      if (s.fight_score < t) continue;
+      const last = alerts.at(-1);
+      if (last && s.start_s <= last.end_s + 0.05) last.end_s = s.end_s; else alerts.push({ start_s: s.start_s, end_s: s.end_s });
+    }
+    const matched = gt ? alerts.filter((a) => gt.some((g) => overlap(a, g) > 0)).length : null;
+    const caught = gt ? gt.filter((g) => alerts.some((a) => overlap(a, g) > 0)).length : null;
+    const tr = r.timing?.training;
+    const note = info.kind === 'trained' && tr
+      ? `Held out in fold ${tr.fold}/${tr.folds}. Trained on ${tr.train_videos} other clips (${tr.train_segments} segments, ${tr.train_fight_segments} fight); never saw this one.`
+      : info.training;
+    const pct = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : '–');
+    return el('tr', {}, [
+      el('td', {}, [el('div', { textContent: r.model }), el('span', { className: `badge ${info.kind}`, textContent: info.kind === 'trained' ? 'trained · held-out' : 'zero-shot' })]),
+      el('td', { textContent: auc === null ? '–' : auc.toFixed(2) }),
+      el('td', { textContent: gt ? pct(tp, tp + fp) : '–' }),
+      el('td', { textContent: gt ? pct(tp, tp + fn) : '–' }),
+      el('td', { textContent: String(alerts.length) }),
+      el('td', { className: gt && alerts.length - matched > 0 ? 'bad' : '', textContent: gt ? String(alerts.length - matched) : '–' }),
+      el('td', { className: gt && gt.length && caught === gt.length ? 'good' : '', textContent: gt && gt.length ? `${caught}/${gt.length}` : '–' }),
+      el('td', { className: 'training-note', textContent: note }),
+    ]);
+  });
+  box.append(
+    el('h3', { textContent: `How each model did on this clip · threshold ${t.toFixed(2)}` }),
+    el('div', { className: 'table-wrap' }, el('table', {}, [
+      el('thead', {}, el('tr', {}, ['Model', 'AUC', 'Precision', 'Recall', 'Alerts', v.label === 'nonfight' ? 'False alarms' : 'Outside fight', 'Fights caught', 'Training'].map((h) => el('th', { textContent: h })))),
+      el('tbody', {}, rows),
+    ])),
+    el('p', { className: 'muted small', textContent: 'Segment-level, against the frame-level annotation: a 2 s segment is "fight" if at least half of it is annotated as fight. Precision/recall at the current threshold; AUC is threshold-free.' }),
+  );
 }
 
 function renderEvents() {
@@ -561,13 +669,42 @@ $('upload-input').addEventListener('change', async (e) => {
 function switchTab(name) {
   state.tab = name;
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
-  for (const t of ['wall', 'monitor', 'eval']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  for (const t of ['wall', 'monitor', 'eval', 'models']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  if (name === 'models') renderModelCards([]);
   if (name === 'wall') renderWall();
   else $('wall-grid').querySelectorAll('video').forEach((v) => v.pause());
   if (name !== 'monitor') $('player').pause();
   if (name === 'eval') refreshMetrics();
 }
 document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
+
+async function renderModelCards(rows) {
+  const cards = await api('/model-cards').catch(() => []);
+  const live = Object.fromEntries(cards.map((c) => [c.name, c.info]));
+  const names = [...new Set([...Object.keys(MODEL_INFO), ...rows.map((r) => r.model)])];
+  $('model-cards').replaceChildren(...names.map((name) => {
+    const info = modelInfo(name);
+    const extra = live[name];
+    const items = [
+      ['Type', info.type], ['Size', info.size], ['Input', info.input], ['How it scores', info.how], ['Training', info.training],
+      ...(extra ? [
+        ['Data', `${extra.videos} clips, ${extra.segments} segments (${extra.fight_segments} fight)`],
+        ['Split', extra.split],
+        ['Held-out result', `segment ROC-AUC ${extra.segment_roc_auc}, average precision ${extra.segment_avg_precision}`],
+        ['Trained', extra.trained_at],
+      ] : []),
+    ].filter(([, v]) => v);
+    return el('div', { className: 'model-card' }, [
+      el('h3', {}, [el('span', { textContent: info.title }), el('span', { className: `badge ${info.kind}`, textContent: info.kind === 'trained' ? 'trained' : 'zero-shot' })]),
+      ...(info.plain ? [el('p', { className: 'plain', textContent: info.plain })] : []),
+      el('dl', {}, items.flatMap(([k, v]) => [el('dt', { textContent: k }), el('dd', { textContent: v })])),
+      ...(info.pros?.length ? [el('div', { className: 'pros-cons' }, [
+        el('div', {}, [el('span', { className: 'good', textContent: 'Strengths' }), el('ul', {}, info.pros.map((x) => el('li', { textContent: x })))]),
+        el('div', {}, [el('span', { className: 'bad', textContent: 'Weaknesses' }), el('ul', {}, info.cons.map((x) => el('li', { textContent: x })))]),
+      ])] : []),
+    ]);
+  }));
+}
 
 async function refreshMetrics() {
   const t = Number($('eval-threshold').value);

@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "node --env-file=.env.local server.js",
     "migrate": "node --env-file=.env.local scripts/migrate.mjs",
-    "import": "node --env-file=.env.local scripts/import.mjs"
+    "import": "node --env-file=.env.local scripts/import.mjs",
+    "load-probe": "node --env-file=.env.local scripts/load-probe.mjs"
   },
   "engines": {
     "node": ">=20"
