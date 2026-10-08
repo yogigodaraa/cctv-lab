@@ -422,8 +422,9 @@ async function runModel(model) {
 }
 
 async function batchRun(model) {
-  const unscored = state.videos.filter((v) => !v.latest?.[model] || v.latest[model].status === 'error').length;
-  if (!confirm(`Queue ${model} on ${unscored} clip(s) that have no result yet? This runs on whichever worker is online (Mac or Kaggle).`)) return;
+  const { would_queue: n } = await api('/runs/batch', { method: 'POST', body: { model, dry_run: true } });
+  if (!n) { alert(`Every clip already has a ${model} result or job.`); return; }
+  if (!confirm(`Queue ${model} on ${n} clip(s) that have no result yet? This runs on whichever worker is online (Mac or Kaggle).`)) return;
   const { queued } = await api('/runs/batch', { method: 'POST', body: { model } });
   alert(`Queued ${queued} video(s) for ${model}.`);
   refreshStatus();
@@ -745,7 +746,7 @@ async function refreshCompute() {
     return el('tr', {}, [
       el('td', { textContent: q.model }), el('td', { textContent: q.queued }), el('td', { textContent: q.running }),
       el('td', { textContent: q.done }), el('td', { textContent: q.error }), el('td', { textContent: q.ms_per_segment ?? '–' }),
-      el('td', { textContent: `${Math.round((100 * q.done) / Math.max(1, c.videos))}%` }),
+      el('td', { textContent: `${Math.round((100 * q.videos_done) / Math.max(1, c.videos))}%` }),
       el('td', {}, canQueue ? el('button', { className: 'ghost', textContent: 'Queue unscored', onclick: async () => { await batchRun(q.model); refreshCompute(); } }) : el('span', { className: 'muted small', textContent: q.model === 'xclip-probe' ? 'trained offline' : '' })),
     ]);
   }));

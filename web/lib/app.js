@@ -218,8 +218,15 @@ api.get('/videos/:id/runs', async (req, res) => {
 
 // Queue every labelled video that has no finished run for this model yet.
 api.post('/runs/batch', async (req, res) => {
-  const { model } = req.body ?? {};
+  const { model, dry_run } = req.body ?? {};
   if (!model) return res.status(400).json({ error: 'model required' });
+  // dry_run returns how many clips WOULD be queued, using the same rule as the insert.
+  if (dry_run) {
+    const [{ n }] = await sql`
+      SELECT count(*)::int AS n FROM videos v
+      WHERE NOT EXISTS (SELECT 1 FROM runs r WHERE r.video_id = v.id AND r.model = ${model} AND r.status <> 'error')`;
+    return res.json({ would_queue: n });
+  }
   const rows = await sql`
     INSERT INTO runs (video_id, model)
     SELECT v.id, ${model} FROM videos v
@@ -276,14 +283,24 @@ api.get('/compute', async (_req, res) => {
            (SELECT count(*)::int FROM runs r WHERE r.worker_id = workers.id AND r.status = 'done') AS runs_done,
            (SELECT max(finished_at) FROM runs r WHERE r.worker_id = workers.id) AS last_finished
     FROM workers ORDER BY last_seen DESC`;
+  // Models come from runs AND from what workers advertise, so a new model gets a row
+  // (and a "Queue unscored" button) before its first run exists.
   const queue = await sql`
-    SELECT model,
-           count(*) FILTER (WHERE status = 'queued')::int AS queued,
-           count(*) FILTER (WHERE status = 'running')::int AS running,
-           count(*) FILTER (WHERE status = 'done')::int AS done,
-           count(*) FILTER (WHERE status = 'error')::int AS error,
-           round(avg((timing->>'ms_per_segment')::real) FILTER (WHERE status = 'done'))::int AS ms_per_segment
-    FROM runs GROUP BY model ORDER BY model`;
+    WITH names AS (
+      SELECT DISTINCT model FROM runs
+      UNION
+      SELECT DISTINCT m->>'name' FROM workers, jsonb_array_elements(workers.models) m
+    )
+    SELECT n.model,
+           count(r.id) FILTER (WHERE r.status = 'queued')::int AS queued,
+           count(r.id) FILTER (WHERE r.status = 'running')::int AS running,
+           count(r.id) FILTER (WHERE r.status = 'done')::int AS done,
+           count(DISTINCT r.video_id) FILTER (WHERE r.status = 'done')::int AS videos_done,
+           count(r.id) FILTER (WHERE r.status = 'error')::int AS error,
+           round(avg((r.timing->>'ms_per_segment')::real) FILTER (WHERE r.status = 'done'))::int AS ms_per_segment
+    FROM names n LEFT JOIN runs r ON r.model = n.model
+    WHERE n.model IS NOT NULL
+    GROUP BY n.model ORDER BY n.model`;
   const [{ videos }] = await sql`SELECT count(*)::int AS videos FROM videos`;
   const recent = await sql`
     SELECT r.id, r.model, r.status, r.error, r.worker_id, r.device, r.created_at, r.started_at, r.finished_at,
