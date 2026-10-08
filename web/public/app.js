@@ -133,7 +133,7 @@ async function showApp() {
   $('app').classList.remove('hidden');
   await Promise.all([refreshStatus(), refreshVideos()]);
   setInterval(refreshStatus, 10_000);
-  setInterval(() => { if (state.tab !== 'monitor') refreshVideos(); }, 20_000);
+  startLive();
 }
 
 $('login-form').addEventListener('submit', async (e) => {
@@ -152,6 +152,47 @@ $('logout').addEventListener('click', async () => {
   await api('/logout', { method: 'POST' });
   location.reload();
 });
+
+// ---------- live updates ----------
+// Every 5 s ask the server whether anything changed (one tiny query); refetch only
+// when it did. Pauses while the browser tab is hidden.
+
+function toast(text) {
+  const t = el('div', { className: 'toast', textContent: text });
+  $('toasts').append(t);
+  setTimeout(() => t.remove(), 6000);
+}
+
+async function liveTick() {
+  if (document.hidden) return;
+  const c = await api('/changes').catch(() => null);
+  if (!c) return;
+  if (state.liveStamp === undefined) { state.liveStamp = c.stamp; state.liveDone = c.done; return; }
+  if (c.stamp === state.liveStamp) return;
+  const gained = c.done - state.liveDone;
+  state.liveStamp = c.stamp;
+  state.liveDone = c.done;
+  const pill = $('live-pill');
+  pill.classList.add('flash');
+  setTimeout(() => pill.classList.remove('flash'), 1500);
+  if (gained > 0) {
+    const who = (c.recent ?? []).map((r) => r.worker_id).filter(Boolean);
+    toast(`${gained} new result${gained === 1 ? '' : 's'}${who.length ? ` from ${[...new Set(who)].join(', ')}` : ''}`);
+  }
+  state.curves = null; // evaluation curves are recomputed on next view
+  await Promise.all([refreshVideos(), refreshStatus()]);
+  if (state.tab === 'eval') refreshMetrics();
+  if (state.tab === 'compute') refreshCompute();
+  if (state.tab === 'monitor' && state.selectedId && $('player').paused) refreshRuns();
+}
+
+function startLive() {
+  clearInterval(state.liveTimer);
+  state.liveTimer = setInterval(liveTick, 5000);
+  const sync = () => $('live-pill').classList.toggle('paused', document.hidden);
+  document.addEventListener('visibilitychange', () => { sync(); if (!document.hidden) liveTick(); });
+  sync();
+}
 
 // ---------- status ----------
 

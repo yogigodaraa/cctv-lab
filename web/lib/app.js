@@ -273,6 +273,25 @@ api.get('/metrics', async (req, res) => {
   res.json(result);
 });
 
+// Cheap change check for live pages: the browser polls this and only refetches when
+// the stamp moves. (Vercel functions cannot hold a push connection open.)
+api.get('/changes', async (_req, res) => {
+  const [c] = await sql`
+    SELECT
+      (SELECT max(GREATEST(created_at, COALESCE(started_at, created_at), COALESCE(finished_at, created_at))) FROM runs) AS runs_at,
+      (SELECT count(*) FROM runs)::int AS runs,
+      (SELECT count(*) FILTER (WHERE status = 'done') FROM runs)::int AS done,
+      (SELECT max(created_at) FROM videos) AS videos_at,
+      (SELECT count(*) FROM videos)::int AS videos,
+      (SELECT max(last_seen) FROM workers) AS worker_at`;
+  const latest = await sql`
+    SELECT r.worker_id, count(*)::int AS n FROM runs r
+    WHERE r.status = 'done' AND r.finished_at > now() - interval '30 seconds'
+    GROUP BY r.worker_id`;
+  res.set('Cache-Control', 'no-store');
+  res.json({ stamp: `${c.runs_at}|${c.runs}|${c.done}|${c.videos_at}|${c.videos}`, done: c.done, worker_at: c.worker_at, recent: latest });
+});
+
 // Compute tab: who is running models (Mac, Kaggle...), the queue, recent jobs.
 api.get('/compute', async (_req, res) => {
   const workers = await sql`
