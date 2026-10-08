@@ -9,8 +9,12 @@ const state = {
   runs: [], // runs (with segments) for the selected video
   threshold: 0.5,
   pollTimer: null,
-  wallLimit: 30, // tiles rendered at once; keeps Blob reads within the free tier
+  wallLimit: 24, // tiles rendered at once; keeps Blob reads within the free tier
   wallFilter: 'all',
+  wallSort: 'longest',
+  tab: 'wall',
+  live: { page: 0, size: 9, filter: 'all', threshold: 0.5 },
+  runsCache: new Map(), // video id -> runs with segments (for the live wall)
 };
 
 // Thumbnails only load when a tile scrolls into view (each load is a Blob read).
@@ -46,10 +50,16 @@ const fmtTime = (s) => {
   const sec = (s % 60).toFixed(1).padStart(4, '0');
   return `${String(m).padStart(2, '0')}:${sec}`;
 };
+const fmtDur = (s) => {
+  if (!s) return '–';
+  const m = Math.floor(s / 60);
+  return m ? `${m}:${String(Math.round(s % 60)).padStart(2, '0')}` : `${Math.round(s)}s`;
+};
 const fmtPct = (v) => (v === null || v === undefined ? '–' : `${(v * 100).toFixed(1)}%`);
 const scoreColor = (s) => `hsl(${Math.round(120 * (1 - s))} 70% 45%)`;
-const el = (tag, props = {}, children = []) => {
+const el = (tag, { dataset, ...props } = {}, children = []) => {
   const node = Object.assign(document.createElement(tag), props);
+  if (dataset) Object.assign(node.dataset, dataset); // dataset is read-only, so copy into it
   for (const c of [].concat(children)) node.append(c);
   return node;
 };
@@ -79,6 +89,7 @@ async function showApp() {
   $('app').classList.remove('hidden');
   await Promise.all([refreshStatus(), refreshVideos()]);
   setInterval(refreshStatus, 10_000);
+  setInterval(() => { if (state.tab !== 'monitor') refreshVideos(); }, 20_000);
 }
 
 $('login-form').addEventListener('submit', async (e) => {
@@ -111,29 +122,71 @@ async function refreshStatus() {
   if (names !== state.models.map((m) => m.name).join()) {
     state.models = status.models;
     renderRunButtons();
+    renderStats();
   }
 }
 
 // ---------- videos ----------
 
 async function refreshVideos() {
+  const key = (withRuns) => state.videos.map((v) => `${v.id}${withRuns ? JSON.stringify(v.latest) : ''}`).join();
+  const [beforeIds, beforeRuns] = [key(false), key(true)];
   state.videos = await api('/videos');
+  renderStats();
   renderTiles();
-  if (!state.selectedId && state.videos.length) selectVideo(state.videos[0].id);
+  if (beforeRuns !== key(true)) state.runsCache.clear(); // new scores: refetch on next wall render
+  // Only rebuild the wall when the set of feeds changes, so playing videos are not restarted.
+  if (beforeIds !== key(false) && state.tab === 'wall') renderWall();
+  if (!state.selectedId && state.videos.length) selectVideo(sortedVideos(state.videos)[0].id);
+}
+
+const camName = (v) => `CAM-${String(state.videos.length - state.videos.indexOf(v)).padStart(2, '0')}`;
+
+function sortedVideos(list) {
+  const maxScore = (v) => Math.max(-1, ...Object.values(v.latest ?? {}).map((r) => r.max_score ?? -1));
+  const by = {
+    longest: (a, b) => (b.duration_s ?? 0) - (a.duration_s ?? 0),
+    score: (a, b) => maxScore(b) - maxScore(a),
+    newest: () => 0,
+  }[state.wallSort];
+  return [...list].sort(by);
+}
+
+// ---------- dataset summary ----------
+
+function renderStats() {
+  const vids = state.videos;
+  const hours = vids.reduce((a, v) => a + (v.duration_s ?? 0), 0) / 3600;
+  const fights = vids.filter((v) => v.label === 'fight').length;
+  const normal = vids.filter((v) => v.label === 'nonfight').length;
+  const gtEvents = vids.reduce((a, v) => a + (Array.isArray(v.gt_segments) ? v.gt_segments.length : 0), 0);
+  const avg = vids.length ? vids.reduce((a, v) => a + (v.duration_s ?? 0), 0) / vids.length : 0;
+  const models = state.models.length ? state.models.map((m) => m.name) : ['xclip'];
+  const analysed = models.map((m) => [m, vids.filter((v) => v.latest?.[m]?.status === 'done').length]);
+  const stat = (value, label, cls = '', extra = null) =>
+    el('div', { className: 'stat' }, [el('div', { className: `stat-value ${cls}`, textContent: value }), el('div', { className: 'stat-label', textContent: label }), ...(extra ? [extra] : [])]);
+  $('stats').replaceChildren(
+    stat(String(vids.length), 'Clips'),
+    stat(hours >= 1 ? `${hours.toFixed(1)} h` : `${Math.round(hours * 60)} min`, 'Footage'),
+    stat(fmtDur(avg), 'Avg clip length'),
+    stat(`${fights} / ${normal}`, 'Fight / normal clips'),
+    stat(String(gtEvents), 'Annotated fight events', 'danger'),
+    ...analysed.map(([m, n]) => stat(`${n}/${vids.length}`, `Analysed · ${m}`, 'accent',
+      el('div', { className: 'progress' }, el('div', { style: `width:${vids.length ? (100 * n) / vids.length : 0}%` })))),
+  );
 }
 
 function renderTiles() {
   const tiles = $('tiles');
   tiles.replaceChildren();
   $('empty-wall').classList.toggle('hidden', state.videos.length > 0);
-  const visible = state.videos.filter((v) => state.wallFilter === 'all' || v.label === state.wallFilter);
+  const visible = sortedVideos(state.videos.filter((v) => state.wallFilter === 'all' || v.label === state.wallFilter));
   $('wall-count').textContent = `${visible.length} clip${visible.length === 1 ? '' : 's'}`;
   visible.slice(0, state.wallLimit).forEach((v) => {
-    const i = state.videos.indexOf(v);
     const scores = Object.entries(v.latest ?? {});
     const flagged = scores.some(([, r]) => r.max_score !== null && r.max_score >= state.threshold);
     const chips = el('div', { className: 'chips' }, [
-      el('span', { className: `chip ${v.label}`, textContent: v.label }),
+      el('span', { className: `chip ${v.label}`, textContent: v.label === 'nonfight' ? 'normal' : v.label }),
       ...scores.map(([model, r]) =>
         el('span', {
           className: `chip ${r.max_score >= state.threshold ? 'hot' : ''}`,
@@ -141,29 +194,141 @@ function renderTiles() {
         })),
     ]);
     const thumb = el('video', { muted: true, preload: 'metadata', playsInline: true });
-    thumb.dataset.src = `${v.url}#t=0.5`;
+    thumb.dataset.src = `${v.url}#t=${Math.min(5, (v.duration_s ?? 1) / 2)}`;
     thumbObserver.observe(thumb);
+    const gtBar = el('div', { className: 'gt-bar', title: 'Annotated fight intervals' },
+      (v.gt_segments ?? []).map((g) => el('div', {
+        style: `left:${(g.start_s / (v.duration_s || 1)) * 100}%;width:${Math.max(0.5, ((g.end_s - g.start_s) / (v.duration_s || 1)) * 100)}%`,
+      })));
     const tile = el('button', {
       className: `tile ${v.id === state.selectedId ? 'active' : ''} ${flagged ? 'flagged' : ''}`,
       onclick: () => selectVideo(v.id),
-    }, [thumb, el('div', { className: 'tile-body' }, [
-      el('div', { className: 'tile-name', textContent: `CAM-${String(i + 1).padStart(2, '0')} · ${v.name}` }),
-      chips,
-    ])]);
+    }, [
+      el('div', { className: 'tile-thumb' }, [thumb, el('span', { className: 'duration', textContent: fmtDur(v.duration_s) })]),
+      gtBar,
+      el('div', { className: 'tile-body' }, [
+        el('div', { className: 'tile-name', textContent: `${camName(v)} · ${v.name}` }),
+        chips,
+      ]),
+    ]);
     tiles.append(tile);
   });
   if (visible.length > state.wallLimit) {
     tiles.append(el('button', {
-      className: 'ghost',
+      className: 'ghost more',
       textContent: `Show more (${visible.length - state.wallLimit} hidden)`,
-      onclick: () => { state.wallLimit += 30; renderTiles(); },
+      onclick: () => { state.wallLimit += 24; renderTiles(); },
     }));
   }
 }
 
+$('wall-sort').addEventListener('change', (e) => {
+  state.wallSort = e.target.value;
+  renderTiles();
+});
+
+// ---------- live camera wall ----------
+
+async function runsFor(id) {
+  if (!state.runsCache.has(id)) state.runsCache.set(id, api(`/videos/${id}/runs`).catch(() => []));
+  return state.runsCache.get(id);
+}
+
+function wallVideos() {
+  const f = state.live.filter;
+  const list = state.videos.filter((v) => f === 'all' || v.label === f);
+  if (f !== 'all') return sortedVideos(list);
+  // Interleave fight and normal feeds so every page looks like a realistic mixed wall.
+  const fights = list.filter((v) => v.label === 'fight');
+  const others = list.filter((v) => v.label !== 'fight');
+  const out = [];
+  for (let i = 0; i < Math.max(fights.length, others.length); i++) {
+    if (others[i]) out.push(others[i]);
+    if (fights[i]) out.push(fights[i]);
+  }
+  return out;
+}
+
+function renderWall() {
+  const grid = $('wall-grid');
+  grid.querySelectorAll('video').forEach((v) => { v.pause(); v.removeAttribute('src'); v.load(); });
+  grid.replaceChildren();
+  const { size } = state.live;
+  grid.style.setProperty('--cols', Math.sqrt(size));
+  const list = wallVideos();
+  const pages = Math.max(1, Math.ceil(list.length / size));
+  state.live.page = Math.min(state.live.page, pages - 1);
+  const pageVids = list.slice(state.live.page * size, (state.live.page + 1) * size);
+  $('wall-page-label').textContent = list.length ? `· page ${state.live.page + 1}/${pages} · ${list.length} feeds` : '';
+  if (!pageVids.length) {
+    grid.append(el('p', { className: 'muted', textContent: 'No footage yet.' }));
+    return;
+  }
+  for (const v of pageVids) {
+    const video = el('video', { muted: true, autoplay: true, loop: true, playsInline: true, preload: 'auto', src: v.url });
+    const clock = el('span', { textContent: '00:00.0' });
+    const alertTag = el('div', { className: 'feed-alert hidden', textContent: '⚠ FIGHT' });
+    const scoreTag = el('span', { textContent: '…' });
+    const head = el('div', { className: 'head' });
+    const dur = v.duration_s || 1;
+    const bar = el('div', { className: 'feed-score' }, [
+      ...(v.gt_segments ?? []).map((g) => el('div', {
+        className: 'gt', style: `left:${(g.start_s / dur) * 100}%;width:${Math.max(0.5, ((g.end_s - g.start_s) / dur) * 100)}%`,
+      })),
+      head,
+    ]);
+    const feed = el('div', { className: 'feed', title: v.name, onclick: () => { switchTab('monitor'); selectVideo(v.id); } }, [
+      video,
+      el('div', { className: 'overlay top-left' }, [el('span', { textContent: `${camName(v)} · ${v.name.replace(/\.mp4$/, '')}` })]),
+      el('div', { className: 'overlay top-right' }, [el('span', { className: 'rec-dot' }), clock]),
+      el('div', { className: 'overlay bottom-left' }, [el('span', {
+        textContent: v.label === 'fight' ? 'GT: fight footage' : v.label === 'nonfight' ? 'GT: normal' : 'unlabelled',
+      })]),
+      el('div', { className: 'overlay bottom-right' }, [scoreTag]),
+      alertTag,
+      bar,
+    ]);
+    grid.append(feed);
+    runsFor(v.id).then((runs) => {
+      const done = runs.filter((r) => r.status === 'done');
+      if (!done.length) scoreTag.textContent = runs.length ? `${runs[0].model} ${runs[0].status}` : 'not analysed';
+      video.addEventListener('timeupdate', () => {
+        const t = video.currentTime;
+        clock.textContent = fmtTime(t);
+        head.style.left = `${(t / (video.duration || dur)) * 100}%`;
+        let top = null;
+        for (const r of done) {
+          const seg = r.segments.find((s) => t >= s.start_s && t < s.end_s);
+          if (seg && (!top || seg.fight_score > top.score)) top = { model: r.model, score: seg.fight_score };
+        }
+        const hot = top && top.score >= state.live.threshold;
+        feed.classList.toggle('alarm', !!hot);
+        alertTag.classList.toggle('hidden', !hot);
+        if (top) {
+          scoreTag.textContent = `${top.model} ${top.score.toFixed(2)}`;
+          scoreTag.style.color = scoreColor(top.score);
+        }
+      });
+    });
+  }
+}
+
+$('wall-layout').addEventListener('change', (e) => { state.live.size = Number(e.target.value); state.live.page = 0; renderWall(); });
+$('wall-filter-live').addEventListener('change', (e) => { state.live.filter = e.target.value; state.live.page = 0; renderWall(); });
+$('wall-threshold').addEventListener('input', (e) => {
+  state.live.threshold = Number(e.target.value);
+  $('wall-threshold-value').textContent = state.live.threshold.toFixed(2);
+});
+$('wall-prev').addEventListener('click', () => { state.live.page = Math.max(0, state.live.page - 1); renderWall(); });
+$('wall-next').addEventListener('click', () => {
+  const pages = Math.ceil(wallVideos().length / state.live.size);
+  state.live.page = (state.live.page + 1) % Math.max(1, pages);
+  renderWall();
+});
+
 $('wall-filter').addEventListener('change', (e) => {
   state.wallFilter = e.target.value;
-  state.wallLimit = 30;
+  state.wallLimit = 24;
   renderTiles();
 });
 
@@ -172,9 +337,9 @@ const selectedVideo = () => state.videos.find((v) => v.id === state.selectedId);
 async function selectVideo(id) {
   state.selectedId = id;
   const v = selectedVideo();
-  const idx = state.videos.indexOf(v);
+  if (!v) return;
   $('player').src = v.url;
-  $('cam-name').textContent = `CAM-${String(idx + 1).padStart(2, '0')} · ${v.name}`;
+  $('cam-name').textContent = `${camName(v)} · ${v.name}`;
   $('label-select').value = v.label;
   renderTiles();
   await refreshRuns();
@@ -222,6 +387,23 @@ function renderTimelines() {
   const duration = $('player').duration || selectedVideo()?.duration_s || 1;
   const wrap = $('timelines');
   wrap.replaceChildren();
+  const v = selectedVideo();
+  if (v && Array.isArray(v.gt_segments)) {
+    const track = el('div', { className: 'track gt-track', title: 'Frame-level ground truth (annotated fight intervals)' },
+      v.gt_segments.length
+        ? v.gt_segments.map((g) => el('div', {
+          className: 'seg gt',
+          title: `Fight ${fmtTime(g.start_s)}–${fmtTime(g.end_s)}`,
+          style: `left:${(g.start_s / duration) * 100}%;width:${Math.max(0.3, ((g.end_s - g.start_s) / duration) * 100)}%`,
+        }))
+        : [el('div', { className: 'track-status', textContent: 'no fight in this clip' })]);
+    track.append(el('div', { className: 'playhead', dataset: { playhead: '' } }));
+    track.onclick = (e) => {
+      const rect = track.getBoundingClientRect();
+      $('player').currentTime = ((e.clientX - rect.left) / rect.width) * duration;
+    };
+    wrap.append(el('div', { className: 'timeline' }, [el('span', { className: 'timeline-name', textContent: 'ground truth' }), track]));
+  }
   for (const run of state.runs) {
     const track = el('div', { className: 'track' });
     if (run.status === 'done') {
@@ -251,19 +433,35 @@ function renderTimelines() {
 function renderEvents() {
   const list = $('events');
   list.replaceChildren();
-  const events = state.runs
-    .filter((r) => r.status === 'done')
-    .flatMap((r) => r.segments.map((s) => ({ ...s, model: r.model })))
-    .filter((s) => s.fight_score >= state.threshold)
-    .sort((a, b) => a.start_s - b.start_s);
+  // Consecutive hot segments merge into one alert, as an operator would see it.
+  const events = [];
+  for (const r of state.runs.filter((x) => x.status === 'done')) {
+    let cur = null;
+    for (const s of r.segments) {
+      if (s.fight_score < state.threshold) { cur = null; continue; }
+      if (cur && s.start_s <= cur.end_s + 0.05) {
+        cur.end_s = s.end_s;
+        if (s.fight_score > cur.fight_score) Object.assign(cur, { fight_score: s.fight_score, caption: s.caption, top_label: s.top_label });
+      } else {
+        cur = { ...s, model: r.model };
+        events.push(cur);
+      }
+    }
+  }
+  events.sort((a, b) => a.start_s - b.start_s);
+  const gt = selectedVideo()?.gt_segments;
+  $('events-count').textContent = events.length ? `· ${events.length}` : '';
 
   for (const ev of events) {
     list.append(el('button', { className: 'event', onclick: () => { $('player').currentTime = ev.start_s; $('player').play(); } }, [
       el('div', { className: 'event-head' }, [
-        el('span', { textContent: `${fmtTime(ev.start_s)} · ${ev.model}` }),
+        el('span', { textContent: `${fmtTime(ev.start_s)}–${fmtTime(ev.end_s)} · ${ev.model}` }),
         el('b', { textContent: ev.fight_score.toFixed(2), style: `color:${scoreColor(ev.fight_score)}` }),
       ]),
-      el('div', { className: 'event-caption', textContent: ev.caption ?? ev.top_label ?? '' }),
+      el('div', { className: 'event-caption', textContent: [
+        Array.isArray(gt) ? (gt.some((g) => g.start_s < ev.end_s && ev.start_s < g.end_s) ? '✓ matches annotated fight' : (selectedVideo()?.label === 'nonfight' ? '✗ false alarm' : '✗ outside annotated fight')) : null,
+        ev.caption ?? ev.top_label,
+      ].filter(Boolean).join(' · ') }),
     ]));
   }
   for (const r of state.runs.filter((x) => x.status === 'done' && x.timing)) {
@@ -360,26 +558,45 @@ $('upload-input').addEventListener('change', async (e) => {
 
 // ---------- tabs & evaluation ----------
 
-document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => {
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t === tab));
-  $('tab-monitor').classList.toggle('hidden', tab.dataset.tab !== 'monitor');
-  $('tab-eval').classList.toggle('hidden', tab.dataset.tab !== 'eval');
-  if (tab.dataset.tab === 'eval') refreshMetrics();
-}));
+function switchTab(name) {
+  state.tab = name;
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+  for (const t of ['wall', 'monitor', 'eval']) $(`tab-${t}`).classList.toggle('hidden', t !== name);
+  if (name === 'wall') renderWall();
+  else $('wall-grid').querySelectorAll('video').forEach((v) => v.pause());
+  if (name !== 'monitor') $('player').pause();
+  if (name === 'eval') refreshMetrics();
+}
+document.querySelectorAll('.tab').forEach((tab) => tab.addEventListener('click', () => switchTab(tab.dataset.tab)));
 
 async function refreshMetrics() {
   const t = Number($('eval-threshold').value);
   const rows = await api(`/metrics?threshold=${t}`);
   const body = $('metrics-body');
   body.replaceChildren();
+  $('eval-cards').replaceChildren(...rows.map((r) => {
+    const kpi = (value, label, cls = '') => el('div', {}, [
+      el('div', { className: `stat-value ${cls}`, textContent: value }), el('div', { className: 'stat-label', textContent: label })]);
+    return el('div', { className: 'eval-card' }, [
+      el('h3', { textContent: `${r.model} @ ${t.toFixed(2)}` }),
+      el('div', { className: 'kpis' }, [
+        kpi(r.roc_auc === null ? '–' : r.roc_auc.toFixed(2), 'ROC-AUC'),
+        kpi(r.fa_per_hour === null ? '–' : r.fa_per_hour.toFixed(1), 'False alarms / h', 'danger'),
+        kpi(r.gt_total ? `${r.gt_caught}/${r.gt_total}` : '–', 'Fights caught', 'accent'),
+      ]),
+      el('div', { className: 'muted small', textContent: `${r.n} clips · ${r.hours.toFixed(1)} h · ${r.normal_hours.toFixed(1)} h normal footage · ${Math.round(r.avg_ms_per_segment)} ms per 2 s segment` }),
+    ]);
+  }));
   if (!rows.length) {
-    body.append(el('tr', {}, el('td', { colSpan: 10, className: 'muted', textContent: 'No labelled videos with finished runs yet.' })));
+    body.append(el('tr', {}, el('td', { colSpan: 13, className: 'muted', textContent: 'No labelled videos with finished runs yet.' })));
     return;
   }
   for (const r of rows) {
     body.append(el('tr', {}, [
-      r.model, r.n, fmtPct(r.accuracy), fmtPct(r.precision), fmtPct(r.recall), fmtPct(r.f1),
+      r.model, r.n, r.hours.toFixed(1), fmtPct(r.accuracy), fmtPct(r.precision), fmtPct(r.recall), fmtPct(r.f1),
       fmtPct(r.fpr), r.roc_auc === null ? '–' : r.roc_auc.toFixed(3),
+      r.fa_per_hour === null ? '–' : r.fa_per_hour.toFixed(1),
+      r.gt_total ? `${r.gt_caught}/${r.gt_total} (${fmtPct(r.gt_caught / r.gt_total)})` : '–',
       Math.round(r.avg_ms_per_segment), `${r.tp} / ${r.fp} / ${r.tn} / ${r.fn}`,
     ].map((c) => el('td', { textContent: String(c) }))));
   }

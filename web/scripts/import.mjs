@@ -3,6 +3,10 @@
 // to Blob storage and registered in the database with an optional ground-truth label.
 //
 //   npm run import -- <dir> [--label fight|nonfight|unknown] [--limit N] [--source name]
+//                          [--annotations <dir>]
+//
+// --annotations points at per-frame 0/1 CSVs named like the videos (UBI-Fights format);
+// they become ground-truth fight intervals shown under the model timelines.
 //
 // Check the dataset licence before importing: most violence datasets are
 // research-only and must not be shared publicly.
@@ -25,6 +29,7 @@ const { values, positionals } = parseArgs({
     label: { type: 'string', default: 'unknown' },
     limit: { type: 'string' },
     source: { type: 'string', default: 'import' },
+    annotations: { type: 'string' },
   },
 });
 const [dir] = positionals;
@@ -44,6 +49,28 @@ async function probe(path) {
     width: info.streams?.[0]?.width ?? null,
     height: info.streams?.[0]?.height ?? null,
   };
+}
+
+async function sourceFps(path) {
+  const { stdout } = await run('ffprobe', [
+    '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=r_frame_rate', '-of', 'csv=p=0', path,
+  ]);
+  const [num, den] = stdout.trim().split('/').map(Number);
+  return den ? num / den : num || 25;
+}
+
+// Per-frame 0/1 labels -> merged [{start_s, end_s}] intervals.
+async function groundTruth(videoPath, csvPath) {
+  const flags = (await readFile(csvPath, 'utf8')).split(/\r?\n/).filter(Boolean).map((l) => Number(l.trim()));
+  const fps = await sourceFps(videoPath);
+  const out = [];
+  let start = null;
+  flags.forEach((f, i) => {
+    if (f && start === null) start = i;
+    if (!f && start !== null) { out.push({ start_s: start / fps, end_s: i / fps }); start = null; }
+  });
+  if (start !== null) out.push({ start_s: start / fps, end_s: flags.length / fps });
+  return out.map((s) => ({ start_s: +s.start_s.toFixed(2), end_s: +s.end_s.toFixed(2) }));
 }
 
 const files = (await readdir(dir))
@@ -68,15 +95,18 @@ for (const [i, file] of files.entries()) {
       '-pix_fmt', 'yuv420p', '-an', '-movflags', '+faststart', out,
     ]);
     const meta = await probe(out);
+    const gt = values.annotations
+      ? await groundTruth(src, join(values.annotations, `${basename(file, extname(file))}.csv`)).catch(() => null)
+      : null;
     const { size } = await stat(out);
     const blob = await put(`videos/${name}`, await readFile(out), {
       access: 'public', contentType: 'video/mp4', addRandomSuffix: true,
     });
     await sql`
-      INSERT INTO videos (name, url, content_type, size_bytes, duration_s, width, height, label, source)
+      INSERT INTO videos (name, url, content_type, size_bytes, duration_s, width, height, label, source, gt_segments)
       VALUES (${name}, ${blob.url}, 'video/mp4', ${size}, ${meta.duration_s}, ${meta.width}, ${meta.height},
-              ${values.label}, ${values.source})`;
-    console.log(`[${i + 1}/${files.length}] ${file} → ${(size / 1e6).toFixed(1)} MB`);
+              ${values.label}, ${values.source}, ${gt ? JSON.stringify(gt) : null})`;
+    console.log(`[${i + 1}/${files.length}] ${file} → ${(size / 1e6).toFixed(1)} MB, ${Math.round(meta.duration_s)} s${gt ? `, ${gt.length} GT fight interval(s)` : ''}`);
   } catch (err) {
     console.error(`[${i + 1}/${files.length}] ${file} failed: ${err.message}`);
   } finally {

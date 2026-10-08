@@ -34,6 +34,8 @@ const SCHEMA = [
      started_at  TIMESTAMPTZ,
      finished_at TIMESTAMPTZ
    )`,
+  // Ground-truth fight intervals [{start_s, end_s}] from frame-level annotations (e.g. UBI-Fights).
+  `ALTER TABLE videos ADD COLUMN IF NOT EXISTS gt_segments JSONB`,
   `CREATE INDEX IF NOT EXISTS runs_status_idx ON runs (status, created_at)`,
   `CREATE INDEX IF NOT EXISTS runs_video_idx ON runs (video_id, model, created_at DESC)`,
   `CREATE TABLE IF NOT EXISTS segments (
