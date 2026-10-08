@@ -30,7 +30,8 @@ Runs the CCTV Lab model worker on this notebook's GPU. It takes queued jobs from
 live site, scores the clips here and posts the scores back, so results show up on
 https://cctv-lab.vercel.app (Compute tab) as each job finishes.
 
-**One-time setup:** Add-ons → Secrets → add `WORKER_TOKEN` and switch it on for this notebook.
+**Token:** read from the attached private dataset `cctv-lab-worker-token` (already set up, nothing to do).
+Optional override: a Kaggle Secret named `WORKER_TOKEN` (Add-ons → Secrets) is used instead when present.
 Settings: Accelerator = GPU, Internet = On. Then Run All (or Save Version → Save & Run All).
 
 The worker stops by itself after `IDLE_MIN` minutes without a new job, or after `MAX_HOURS`.
@@ -55,7 +56,7 @@ if not WORKER_TOKEN:  # fallback: private dataset attached in kernel-metadata.js
     if files:
         WORKER_TOKEN, source = open(files[0]).read().strip(), "private dataset"
 if not WORKER_TOKEN:
-    raise RuntimeError("No WORKER_TOKEN: add it under Add-ons > Secrets, or attach the private dataset cctv-lab-worker-token.")
+    raise RuntimeError("No WORKER_TOKEN: attach the private dataset cctv-lab-worker-token (default), or add a WORKER_TOKEN secret under Add-ons > Secrets.")
 print(f"WORKER_TOKEN loaded from {source} (hidden).")
 gpu = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True).stdout.strip()
 print("GPU:", gpu or "none (turn on Accelerator = GPU)")
