@@ -5,12 +5,13 @@ on 2 s segments labelled from UBI-Fights' frame-level annotations (a segment is
 "fight" if at least half its frames are). Evaluation is 5-fold cross-validation
 grouped by video: every video's scores come from a model that never saw that
 video, so per-video results are honest held-out results. The regularisation
-strength is picked inside each training fold (nested CV), never on test videos.
-Scores are then smoothed over neighbouring segments, since fights last longer
-than 2 s.
+strength and a causal smoothing window are picked inside each training fold
+(nested CV), never on test videos. Smoothing only averages the current and
+*previous* segments, so scores are valid for live use (a window of w segments
+adds no look-ahead; it only reacts over the last 2w seconds).
 
 Usage:
-    python train_probe.py <UBI_FIGHTS dir> <out.json>
+    python train_probe.py <UBI_FIGHTS dir> <out.json> [feature cache dir]
 
 Writes per-video out-of-fold segment scores plus a training summary; the web
 side loads them with `npm run load-probe -- <out.json>`.
@@ -41,16 +42,21 @@ FRAMES = 8
 BATCH = 8
 FOLDS = 5
 C_GRID = (0.5, 0.05, 0.005, 0.0005)  # chosen per outer fold by inner grouped CV
-SMOOTH = 2  # average each segment's score with 2 neighbours either side (fixed a priori)
+WINDOWS = (1, 3, 5)  # causal smoothing window (segments), chosen with C by inner CV
 
 
-def smooth(p: np.ndarray, groups: np.ndarray, k: int = SMOOTH) -> np.ndarray:
-    """Moving average of scores within each video (edges padded)."""
+def smooth(p: np.ndarray, groups: np.ndarray, w: int) -> np.ndarray:
+    """Causal moving average within each video: mean of the current and previous
+    w - 1 segments (the first segments use what is available). No look-ahead."""
+    if w <= 1:
+        return p.copy()
     q = p.copy()
     for g in np.unique(groups):
-        m = groups == g
-        s = np.pad(p[m], (k, k), mode="edge")
-        q[m] = np.convolve(s, np.ones(2 * k + 1) / (2 * k + 1), mode="valid")
+        m = np.flatnonzero(groups == g)
+        c = np.cumsum(np.insert(p[m], 0, 0.0))
+        idx = np.arange(1, len(m) + 1)
+        lo = np.maximum(idx - w, 0)
+        q[m] = (c[idx] - c[lo]) / (idx - lo)
     return q
 
 
@@ -82,7 +88,7 @@ def embed_video(path: str, model, processor, device) -> tuple[np.ndarray, list[t
 
 def main() -> None:
     root, out_path = sys.argv[1], sys.argv[2]
-    cache_dir = os.path.join(os.path.dirname(os.path.abspath(out_path)), "probe-cache")
+    cache_dir = sys.argv[3] if len(sys.argv) > 3 else os.path.join(os.path.dirname(os.path.abspath(out_path)), "probe-cache")
     os.makedirs(cache_dir, exist_ok=True)
     device = pick_device()
     model = processor = None
@@ -126,6 +132,7 @@ def main() -> None:
     video_label = np.array([1 if meta[g]["label"] == "fight" else 0 for g in groups])
 
     oof = np.zeros(len(y))
+    raw = np.zeros(len(y))
     fold_of_video = {}
     cv = StratifiedGroupKFold(n_splits=FOLDS, shuffle=True, random_state=0)
     def head(c):
@@ -134,31 +141,33 @@ def main() -> None:
     chosen = []
     for k, (tr, te) in enumerate(cv.split(X, video_label, groups)):
         inner = StratifiedGroupKFold(n_splits=3, shuffle=True, random_state=1)
-        best_c, best_auc = None, -1.0
+        best_c, best_w, best_auc = None, None, -1.0
         for c in C_GRID:
             p = np.zeros(len(tr))
             for itr, ite in inner.split(X[tr], video_label[tr], groups[tr]):
                 p[ite] = head(c).fit(X[tr][itr], y[tr][itr]).predict_proba(X[tr][ite])[:, 1]
-            auc = roc_auc_score(y[tr], smooth(p, groups[tr]))
-            if auc > best_auc:
-                best_c, best_auc = c, auc
-        chosen.append(best_c)
-        oof[te] = head(best_c).fit(X[tr], y[tr]).predict_proba(X[te])[:, 1]
+            for w in WINDOWS:
+                auc = roc_auc_score(y[tr], smooth(p, groups[tr], w))
+                if auc > best_auc:
+                    best_c, best_w, best_auc = c, w, auc
+        chosen.append((best_c, best_w))
+        raw[te] = head(best_c).fit(X[tr], y[tr]).predict_proba(X[te])[:, 1]
+        oof[te] = smooth(raw[te], groups[te], best_w)
         for g in np.unique(groups[te]):
             fold_of_video[int(g)] = {
                 "C": best_c,
+                "window": best_w,
                 "fold": k + 1,
                 "train_videos": int(len(np.unique(groups[tr]))),
                 "train_segments": int(len(tr)),
                 "train_fight_segments": int(y[tr].sum()),
             }
 
-    raw_auc = roc_auc_score(y, oof)
-    oof = smooth(oof, groups)
+    raw_auc = roc_auc_score(y, raw)
     summary = {
         "model": "xclip-probe",
         "backbone": MODEL_ID + " (frozen)",
-        "head": f"standardise + logistic regression (class-balanced, C picked per fold from {list(C_GRID)} by inner CV: {chosen}) + temporal smoothing ±{SMOOTH} segments",
+        "head": f"standardise + logistic regression (class-balanced) + causal smoothing; (C, window) picked per fold by inner CV from C {list(C_GRID)} x window {list(WINDOWS)}: {chosen}",
         "data": "UBI-Fights subset, segment labels from frame-level annotations (>= 50% fight frames)",
         "videos": len(videos),
         "segments": int(len(y)),

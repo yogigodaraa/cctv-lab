@@ -178,7 +178,7 @@ export const PAPERS = [
     url: 'https://arxiv.org/abs/2208.02816', theme: 'vl', rq: [1, 2], used: true,
     offers: 'Extends CLIP to video with cross-frame attention and video-specific prompts.',
     why: 'Model 1 in CCTV Lab (zero-shot) and the frozen backbone of the trained head.',
-    limit: 'Never trained on fights; zero-shot gives ~49 false alarms/h at 66% event recall on our UBI-Fights subset.',
+    limit: 'Never trained on fights; zero-shot gives ~23 false alarms/h at 66% event recall on our UBI-Fights subset (held-out threshold).',
     question: 'How much of the trained head\'s gain would a pose model keep while dropping pixels?',
   },
   {
@@ -197,7 +197,7 @@ export const PAPERS = [
 export const EXPERIMENTS = [
   { id: 'E1', status: 'done', rq: [2], title: 'Zero-shot X-CLIP vs a trained head on frozen X-CLIP features',
     hypothesis: 'A small classifier trained on CCTV fight labels cuts false alarms compared with text prompts alone.',
-    result: 'All 78 UBI-Fights videos, same 66% event recall: 49.4 → 4.3 false alarms/h (about 11× fewer); segment ROC-AUC 0.74 → 0.82 (5-fold CV grouped by video, nested model selection).' },
+    result: 'Held-out, thresholds chosen on training folds, causal smoothing for both: at ~66% of fights caught, 23.1 → 6.1 false alarms/h (3.8×, 95% CI 1.9–10.9×); segment AUC 0.74 → 0.81. At 80% recall the gap closes (1.3×, CI 0.6–2.5). 78 UBI-Fights videos; small, in-domain sample.' },
   { id: 'E2', status: 'done', rq: [2, 3], title: 'Tiny VLM (SmolVLM-256M) as a frame-level detector',
     hypothesis: 'A small VLM answering "is anyone fighting?" is a usable detector.',
     result: 'Rejected so far: on short clips it almost never answers "Yes" (recall 5% at threshold 0.1). Single frames cannot show motion.' },
