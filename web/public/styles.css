@@ -236,7 +236,10 @@ table.backlog td { white-space: normal; text-align: left; font-size: 12px; }
 table.backlog th { text-align: left; }
 table.backlog td:first-child { font-weight: 600; white-space: nowrap; }
 .papers { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
-@media (max-width: 520px) { .papers { grid-template-columns: 1fr; } }
+@media (max-width: 520px) {
+  .tabs { order: 3; width: 100%; margin-left: 0; overflow-x: auto; }
+  .papers { grid-template-columns: 1fr; }
+}
 .paper { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
 .paper h3 { margin: 0; font-size: 14px; line-height: 1.35; }
 .paper h3 a { color: var(--text); text-decoration: none; }
