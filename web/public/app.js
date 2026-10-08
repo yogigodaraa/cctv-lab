@@ -719,8 +719,12 @@ function renderResearch() {
     el('span', { className: 'muted', textContent: `${EXPERIMENTS.filter((e) => e.rq.includes(q.id)).length} experiments · ${PAPERS.filter((p) => p.rq.includes(q.id)).length} papers` }),
   ])));
 
-  const done = EXPERIMENTS.filter((e) => e.status === 'done').length;
-  $('exp-count').textContent = `· ${done} done, ${EXPERIMENTS.length - done} planned`;
+  const statuses = ['done', 'running', 'next', 'planned'];
+  $('exp-count').textContent = `· ${statuses
+    .map((status) => [status, EXPERIMENTS.filter((e) => e.status === status).length])
+    .filter(([, count]) => count > 0)
+    .map(([status, count]) => `${count} ${status}`)
+    .join(', ')}`;
   $('experiments').replaceChildren(...EXPERIMENTS.map((e) => el('div', { className: 'exp' }, [
     el('span', { className: 'exp-id', textContent: e.id }),
     el('div', { className: 'exp-head' }, [el('b', { textContent: e.title }), el('span', { className: `status ${e.status}`, textContent: e.status }), ...rqChips(e.rq)]),
