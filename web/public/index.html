@@ -35,6 +35,7 @@
       <div class="status">
         <span id="worker-pill" class="pill">Worker: checking…</span>
         <span id="queue-pill" class="pill">Queue: –</span>
+        <span id="live-pill" class="pill live" title="Pages update by themselves when new results arrive (checked every 5 s)"><span class="live-dot"></span> LIVE</span>
       </div>
       <div class="actions">
         <label class="toggle" title="Blur video: the models still see full frames, the viewer does not">
@@ -49,6 +50,7 @@
     </header>
 
     <div id="upload-progress" class="upload-progress hidden"></div>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
 
     <!-- Dataset summary -->
     <section class="stats" id="stats"></section>
